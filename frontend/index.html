@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF 高精度解析系统</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>PDF 高精度解析系统</h1>
+        <p>基于 YOLO26m + Surya + PaddleOCR 的文档智能解析</p>
+    </header>
+
+    <main>
+        <section id="upload-section" class="card">
+            <h2>上传 PDF 文件</h2>
+            <div id="drop-zone" class="drop-zone">
+                <p>拖拽 PDF 文件到此处，或点击选择文件</p>
+                <input type="file" id="file-input" accept=".pdf" hidden>
+            </div>
+            <div id="upload-progress" class="progress-bar hidden">
+                <div class="progress-fill"></div>
+                <span class="progress-text">0%</span>
+            </div>
+            <div id="upload-result" class="result-msg hidden"></div>
+        </section>
+
+        <section id="documents-section" class="card">
+            <h2>文档列表</h2>
+            <div id="documents-list" class="documents-list">
+                <p class="empty-msg">暂无文档</p>
+            </div>
+        </section>
+
+        <section id="parse-section" class="card hidden">
+            <h2>解析进度</h2>
+            <div id="parse-status"></div>
+            <div id="parse-pages" class="pages-grid"></div>
+        </section>
+
+        <section id="results-section" class="card hidden">
+            <div class="results-header">
+                <h2>解析结果</h2>
+                <div class="tab-bar">
+                    <button class="tab-btn active" data-tab="markdown">Markdown</button>
+                    <button class="tab-btn" data-tab="elements">结构化元素</button>
+                    <button class="tab-btn" data-tab="json">JSON</button>
+                </div>
+            </div>
+            <div id="tab-markdown" class="tab-content active">
+                <div id="markdown-content" class="markdown-body"></div>
+            </div>
+            <div id="tab-elements" class="tab-content">
+                <div id="elements-content"></div>
+            </div>
+            <div id="tab-json" class="tab-content">
+                <pre id="json-content"></pre>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

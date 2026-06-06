@@ -75,3 +75,32 @@ def detect_layout(image_path: str) -> list[dict]:
         })
 
     return elements
+
+
+def detect_layout_batch(image_paths: list[str]) -> list[list[dict]]:
+    if not image_paths:
+        return []
+
+    model = _get_model()
+    results = model(image_paths, imgsz=YOLO_IMG_SIZE, verbose=False)
+
+    all_elements = []
+    for result in results:
+        elements = []
+        boxes = result.boxes
+        if boxes is not None:
+            for i in range(len(boxes)):
+                box = boxes[i]
+                xyxy = box.xyxy[0].cpu().numpy()
+                conf = float(box.conf[0].cpu().numpy())
+                cls_id = int(box.cls[0].cpu().numpy())
+                element_type = YOLO_CATEGORY_MAP.get(cls_id, f"Unknown-{cls_id}")
+                elements.append({
+                    "element_type": element_type,
+                    "bbox": (float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])),
+                    "confidence": conf,
+                    "reading_order": -1,
+                })
+        all_elements.append(elements)
+
+    return all_elements

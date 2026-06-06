@@ -15,6 +15,9 @@ YOLO_MODEL_REPO = "Armaggheddon/yolo26-document-layout"
 YOLO_MODEL_FILE = "yolo26m_doc_layout.pt"
 YOLO_IMG_SIZE = 1280
 
-SCAN_TEXT_THRESHOLD = 50
+SCAN_TEXT_THRESHOLD = 10
+SCAN_IMAGE_AREA_RATIO = 0.8
+
+GARBLE_CJK_THRESHOLD = 0.3
 
 TABLE_STRATEGY = "lines_strict"

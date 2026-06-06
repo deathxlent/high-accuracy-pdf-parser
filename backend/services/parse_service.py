@@ -3,10 +3,12 @@ import asyncio
 import fitz
 from pathlib import Path
 from backend import database as db
-from backend.services.pdf_service import validate_pdf, prepare_pages, extract_text_in_region
-from backend.services.layout_service import detect_layout
-from backend.services.order_service import assign_reading_order
-from backend.services.ocr_service import ocr_region, ocr_formula
+from backend.services.pdf_service import (
+    validate_pdf, prepare_pages, extract_text_in_region, detect_garbled_text
+)
+from backend.services.layout_service import detect_layout_batch
+from backend.services.order_service import assign_reading_order, assign_reading_order_batch
+from backend.services.ocr_service import ocr_region, ocr_formula, ocr_batch, ocr_batch_multi_image
 from backend.services.table_service import extract_table_from_native, extract_table_from_scanned
 from backend.services.picture_service import extract_picture
 
@@ -61,6 +63,28 @@ async def process_document(doc_id: int):
         await db.update_document(doc_id, status="pages_ready")
 
         pages = await db.get_pages(doc_id)
+
+        all_elements = []
+        all_jpg_paths = []
+        for page in pages:
+            jpg_path = page["jpg_path"]
+            all_jpg_paths.append(jpg_path)
+
+        logger.info("Batch detecting layouts for all pages...")
+        layouts = await asyncio.to_thread(detect_layout_batch, all_jpg_paths)
+
+        logger.info("Batch assigning reading orders for all pages...")
+        layouts_with_order = await asyncio.to_thread(
+            assign_reading_order_batch, layouts, all_jpg_paths
+        )
+
+        for page_idx, page in enumerate(pages):
+            try:
+                page["_elements"] = layouts_with_order[page_idx]
+            except Exception as e:
+                    logger.error(f"Failed to assign reading order for page {page['page_number']}: {e}")
+                    page["_elements"] = []
+
         for page in pages:
             try:
                 await _parse_page(doc_id, page, doc_dir)
@@ -80,14 +104,7 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str):
     jpg_path = page_info["jpg_path"]
     single_pdf_path = page_info["single_pdf_path"]
     is_scanned = page_info["is_scanned"]
-
-    await db.update_page(page_id, status="parsing_layout")
-
-    elements = await asyncio.to_thread(detect_layout, jpg_path)
-    logger.info(f"Page {page_info['page_number']}: detected {len(elements)} elements")
-
-    elements = await asyncio.to_thread(assign_reading_order, elements, jpg_path)
-    logger.info(f"Page {page_info['page_number']}: reading order assigned")
+    elements = page_info.get("_elements", [])
 
     await db.update_page(page_id, status="parsing_content")
 
@@ -97,7 +114,61 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str):
     output_dir = str(Path(doc_dir) / "output")
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    for elem in elements:
+    page_text = pdf_page.get_text("text")
+    garble_result = detect_garbled_text(page_text)
+    has_garbled = garble_result["is_garbled"]
+    force_ocr = is_scanned or has_garbled
+
+    if has_garbled:
+        logger.info(f"Page {page_info['page_number']}: text is garbled (ratio: {garble_result['garble_ratio']:.2f}), forcing OCR")
+
+    ocr_tasks = []
+    ocr_indices = []
+    formula_tasks = []
+    formula_indices = []
+    table_tasks = []
+    table_indices = []
+
+    for elem_idx, elem in enumerate(elements):
+        elem_type = elem["element_type"]
+        bbox = elem["bbox"]
+
+        if elem_type in TEXT_TYPES and force_ocr:
+            ocr_tasks.append(bbox)
+            ocr_indices.append(elem_idx)
+        elif elem_type == "Formula":
+            formula_tasks.append(bbox)
+            formula_indices.append(elem_idx)
+        elif elem_type == "Table" and force_ocr:
+            table_tasks.append(bbox)
+            table_indices.append(elem_idx)
+
+    ocr_results = {}
+    formula_results = {}
+    table_results = {}
+
+    if ocr_tasks:
+        logger.info(f"Page {page_info['page_number']}: batch OCR for {len(ocr_tasks)} text regions")
+        texts = await asyncio.to_thread(ocr_batch, jpg_path, ocr_tasks)
+        for idx, text in zip(ocr_indices, texts):
+            ocr_results[idx] = text
+
+    if formula_tasks:
+        logger.info(f"Page {page_info['page_number']}: batch OCR for {len(formula_tasks)} formula regions")
+        formulas = await asyncio.to_thread(ocr_batch, jpg_path, formula_tasks)
+        for idx, text in zip(formula_indices, formulas):
+            latex = " ".join([t for t in text.split("\n") if t.strip()])
+            if latex and not latex.startswith("$"):
+                latex = f"${latex}$"
+            formula_results[idx] = latex
+
+    if table_tasks:
+        logger.info(f"Page {page_info['page_number']}: batch OCR for {len(table_tasks)} table regions")
+        for idx, bbox in zip(table_indices, table_tasks):
+            result = await asyncio.to_thread(extract_table_from_scanned, jpg_path, bbox)
+            table_results[idx] = result
+
+    for elem_idx, elem in enumerate(elements):
         elem_type = elem["element_type"]
         bbox = elem["bbox"]
         confidence = elem["confidence"]
@@ -107,15 +178,17 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str):
 
         try:
             if elem_type in TEXT_TYPES:
-                if is_scanned:
-                    content = await asyncio.to_thread(ocr_region, jpg_path, bbox)
-                    content_format = "markdown"
+                if elem_idx in ocr_results:
+                    content = ocr_results[elem_idx]
                 else:
                     content = await asyncio.to_thread(extract_text_in_region, pdf_page, bbox)
-                    content_format = "markdown"
+                content_format = "markdown"
 
             elif elem_type == "Formula":
-                content = await asyncio.to_thread(ocr_formula, jpg_path, bbox)
+                if elem_idx in formula_results:
+                    content = formula_results[elem_idx]
+                else:
+                    content = await asyncio.to_thread(ocr_formula, jpg_path, bbox)
                 content_format = "latex"
 
             elif elem_type == "Picture":
@@ -126,10 +199,13 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str):
                 content_format = "image_path"
 
             elif elem_type == "Table":
-                if is_scanned:
-                    result = await asyncio.to_thread(extract_table_from_scanned, jpg_path, bbox)
+                if elem_idx in table_results:
+                    result = table_results[elem_idx]
                 else:
-                    result = await asyncio.to_thread(extract_table_from_native, pdf_page, bbox)
+                    pdf_bbox = (bbox[0], bbox[1], bbox[2], bbox[3])
+                    result = await asyncio.to_thread(
+                        extract_table_from_native, jpg_path, bbox, pdf_page, pdf_bbox
+                    )
                 content = result.get("markdown", "") or result.get("html", "")
                 content_format = "markdown" if result.get("markdown") else "html"
 

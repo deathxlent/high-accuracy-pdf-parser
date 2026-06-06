@@ -1,7 +1,9 @@
 import fitz
 import os
+import re
+import unicodedata
 from pathlib import Path
-from backend.config import TMP_DIR, SCAN_TEXT_THRESHOLD
+from backend.config import TMP_DIR, SCAN_TEXT_THRESHOLD, SCAN_IMAGE_AREA_RATIO, GARBLE_CJK_THRESHOLD
 
 
 def validate_pdf(file_path: str) -> dict:
@@ -31,8 +33,54 @@ def validate_pdf(file_path: str) -> dict:
 def is_page_scanned(page: fitz.Page) -> bool:
     text = page.get_text("text").strip()
     if len(text) < SCAN_TEXT_THRESHOLD:
-        return True
+        images = page.get_images(full=True)
+        if len(images) == 1 and len(text) == 0:
+            page_area = page.rect.width * page.rect.height
+            try:
+                img_info = page.get_image_info(hashes=False)
+                if len(img_info) == 1:
+                    bbox = img_info[0]["bbox"]
+                    img_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    ratio = img_area / page_area if page_area > 0 else 0
+                    if ratio >= SCAN_IMAGE_AREA_RATIO:
+                        return True
+            except Exception:
+                pass
+        return len(text) < SCAN_TEXT_THRESHOLD
     return False
+
+
+def detect_garbled_text(text: str) -> dict:
+    result = {
+        "is_garbled": False,
+        "garble_ratio": 0.0,
+        "total_cjk": 0,
+        "garbled_cjk": 0,
+    }
+
+    if not text:
+        return result
+
+    cjk_pattern = re.compile(r'[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]')
+    garbled_chars = []
+
+    for ch in text:
+        if cjk_pattern.match(ch):
+            result["total_cjk"] += 1
+            if ord(ch) in (0xfffd, 0x25a1) or (0x0000 <= ord(ch) <= 0x001f) or (0x007f <= ord(ch) <= 0x009f):
+                result["garbled_cjk"] += 1
+                garbled_chars.append(ch)
+            elif unicodedata.category(ch).startswith('C') and ch not in '\t\n\r':
+                result["garbled_cjk"] += 1
+                garbled_chars.append(ch)
+
+    if result["total_cjk"] > 0:
+        result["garble_ratio"] = result["garbled_cjk"] / result["total_cjk"]
+
+    if result["garble_ratio"] >= GARBLE_CJK_THRESHOLD:
+        result["is_garbled"] = True
+
+    return result
 
 
 def convert_page_to_jpg(page: fitz.Page, output_path: str, dpi: int = 200) -> str:

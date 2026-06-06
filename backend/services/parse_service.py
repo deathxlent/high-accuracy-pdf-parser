@@ -202,9 +202,8 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str):
                 if elem_idx in table_results:
                     result = table_results[elem_idx]
                 else:
-                    pdf_bbox = (bbox[0], bbox[1], bbox[2], bbox[3])
                     result = await asyncio.to_thread(
-                        extract_table_from_native, jpg_path, bbox, pdf_page, pdf_bbox
+                        extract_table_from_native, pdf_page, bbox
                     )
                 content = result.get("markdown", "") or result.get("html", "")
                 content_format = "markdown" if result.get("markdown") else "html"

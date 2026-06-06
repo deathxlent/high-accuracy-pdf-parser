@@ -5,6 +5,19 @@ import unicodedata
 from pathlib import Path
 from backend.config import TMP_DIR, SCAN_TEXT_THRESHOLD, SCAN_IMAGE_AREA_RATIO, GARBLE_CJK_THRESHOLD
 
+DEFAULT_DPI = 200
+PDF_DPI = 72
+
+
+def jpg_bbox_to_pdf_bbox(bbox: tuple[float, float, float, float], dpi: int = DEFAULT_DPI) -> tuple[float, float, float, float]:
+    scale = PDF_DPI / dpi
+    return (
+        bbox[0] * scale,
+        bbox[1] * scale,
+        bbox[2] * scale,
+        bbox[3] * scale,
+    )
+
 
 def validate_pdf(file_path: str) -> dict:
     result = {"valid": False, "encrypted": False, "page_count": 0, "error": None}
@@ -98,7 +111,10 @@ def save_single_page_pdf(doc: fitz.Document, page_idx: int, output_path: str) ->
     return output_path
 
 
-def extract_text_in_region(page: fitz.Page, bbox: tuple[float, float, float, float]) -> str:
+def extract_text_in_region(page: fitz.Page, bbox: tuple[float, float, float, float],
+                           bbox_is_jpg: bool = True, dpi: int = DEFAULT_DPI) -> str:
+    if bbox_is_jpg:
+        bbox = jpg_bbox_to_pdf_bbox(bbox, dpi)
     rect = fitz.Rect(bbox)
     if rect.is_empty or not rect.is_valid:
         return ""
@@ -148,7 +164,9 @@ def prepare_pages(file_path: str, doc_dir: str) -> list[dict]:
 
 
 def clip_region_as_image(page: fitz.Page, bbox: tuple[float, float, float, float],
-                         output_path: str, dpi: int = 200) -> str:
+                         output_path: str, bbox_is_jpg: bool = True, dpi: int = DEFAULT_DPI) -> str:
+    if bbox_is_jpg:
+        bbox = jpg_bbox_to_pdf_bbox(bbox, dpi)
     rect = fitz.Rect(bbox)
     if rect.is_empty or not rect.is_valid:
         return ""

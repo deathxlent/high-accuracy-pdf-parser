@@ -281,6 +281,7 @@ def _build_markdown(pages: list[dict]) -> str:
         for elem in elements:
             etype = elem["type"]
             content = elem.get("content", "") or ""
+            content_format = elem.get("content_format", "") or ""
 
             if etype == "Title":
                 parts.append(f"# {content}\n")

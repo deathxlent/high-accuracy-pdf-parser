@@ -205,8 +205,8 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str):
                     result = await asyncio.to_thread(
                         extract_table_from_native, pdf_page, bbox
                     )
-                content = result.get("markdown", "") or result.get("html", "")
-                content_format = "markdown" if result.get("markdown") else "html"
+                content = result.get("html", "") or result.get("markdown", "")
+                content_format = "html" if result.get("html") else "markdown"
 
             await db.create_element(
                 page_id, elem_type, bbox, confidence, reading_order,
@@ -292,7 +292,10 @@ def _build_markdown(pages: list[dict]) -> str:
             elif etype == "Formula":
                 parts.append(f"\n{content}\n")
             elif etype == "Table":
-                parts.append(f"\n{content}\n")
+                if content_format == "html":
+                    parts.append(f"\n{content}\n")
+                else:
+                    parts.append(f"\n{content}\n")
             elif etype == "Picture":
                 if content:
                     parts.append(f"\n![Picture]({content})\n")

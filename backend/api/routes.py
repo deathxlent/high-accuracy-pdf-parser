@@ -1,9 +1,11 @@
 import os
 import uuid
 import asyncio
+import aiosqlite
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from backend.config import TMP_DIR
+from fastapi.responses import FileResponse
+from backend.config import TMP_DIR, DB_PATH
 from backend import database as db
 from backend.services.parse_service import process_upload, process_document, get_parse_results
 
@@ -66,9 +68,14 @@ async def get_status(doc_id: int):
     pages = await db.get_pages(doc_id)
     page_statuses = [
         {
+            "id": p["id"],
             "page_number": p["page_number"],
+            "width": p["width"],
+            "height": p["height"],
             "status": p["status"],
             "is_scanned": bool(p["is_scanned"]),
+            "jpg_path": p["jpg_path"],
+            "single_pdf_path": p["single_pdf_path"],
         }
         for p in pages
     ]
@@ -113,3 +120,106 @@ async def delete_doc(doc_id: int):
 
     await db.delete_document(doc_id)
     return {"message": "Deleted", "document_id": doc_id}
+
+
+@router.post("/reparse/{doc_id}")
+async def reparse_document(doc_id: int):
+    doc = await db.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if doc["status"] == "processing":
+        return {"message": "Already processing", "document_id": doc_id}
+
+    pages = await db.get_pages(doc_id)
+    for page in pages:
+        await db.execute_query("DELETE FROM page_elements WHERE page_id = ?", (page["id"],))
+        await db.update_page(page["id"], status="pending")
+
+    await db.update_document(doc_id, status="uploaded", error_message=None)
+
+    task = asyncio.create_task(process_document(doc_id))
+    _processing_tasks[doc_id] = task
+
+    return {"message": "Reparsing started", "document_id": doc_id}
+
+
+@router.put("/elements/{element_id}")
+async def update_element(element_id: int, data: dict):
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Element not found")
+
+        updates = {}
+        if "content" in data:
+            updates["content"] = data["content"]
+        if "reading_order" in data:
+            updates["reading_order"] = data["reading_order"]
+        if "element_type" in data:
+            updates["element_type"] = data["element_type"]
+
+        if updates:
+            sets = ", ".join(f"{k} = ?" for k in updates)
+            vals = list(updates.values()) + [element_id]
+            await db.execute(f"UPDATE page_elements SET {sets} WHERE id = ?", vals)
+            await db.commit()
+
+        cursor = await db.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
+        row = await cursor.fetchone()
+        return dict(row)
+
+
+@router.put("/pages/{page_id}/elements/reorder")
+async def reorder_elements(page_id: int, data: dict):
+    element_order = data.get("element_order", [])
+    if not element_order:
+        raise HTTPException(status_code=400, detail="element_order is required")
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        for idx, elem_id in enumerate(element_order):
+            await db.execute(
+                "UPDATE page_elements SET reading_order = ? WHERE id = ? AND page_id = ?",
+                (idx, elem_id, page_id)
+            )
+        await db.commit()
+
+    return {"message": "Elements reordered", "page_id": page_id}
+
+
+@router.get("/documents/{doc_id}/thumbnail")
+async def get_document_thumbnail(doc_id: int):
+    doc = await db.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    pages = await db.get_pages(doc_id)
+    if pages and pages[0]["jpg_path"]:
+        jpg_path = pages[0]["jpg_path"]
+        if os.path.exists(jpg_path):
+            return FileResponse(jpg_path)
+
+    return {"error": "No thumbnail available"}, 404
+
+
+@router.get("/pages/{page_id}/pdf")
+async def get_page_pdf(page_id: int):
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM pdf_pages WHERE id = ?", (page_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Page not found")
+
+        if row["single_pdf_path"] and os.path.exists(row["single_pdf_path"]):
+            return FileResponse(row["single_pdf_path"])
+
+    return {"error": "No single PDF available"}, 404
+
+
+@router.get("/pages/{page_id}/elements")
+async def get_page_elements_api(page_id: int):
+    elements = await db.get_elements(page_id)
+    return {"elements": elements}

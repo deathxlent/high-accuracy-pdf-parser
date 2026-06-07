@@ -188,3 +188,25 @@ async def delete_document(doc_id: int):
         await db.execute("DELETE FROM pdf_pages WHERE document_id = ?", (doc_id,))
         await db.execute("DELETE FROM pdf_documents WHERE id = ?", (doc_id,))
         await db.commit()
+
+
+async def execute_query(sql: str, params: tuple = ()):
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        await db.execute(sql, params)
+        await db.commit()
+
+
+async def update_element(element_id: int, **kwargs):
+    sets = ", ".join(f"{k} = ?" for k in kwargs)
+    vals = list(kwargs.values()) + [element_id]
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        await db.execute(f"UPDATE page_elements SET {sets} WHERE id = ?", vals)
+        await db.commit()
+
+
+async def get_element(element_id: int) -> dict | None:
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None

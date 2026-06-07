@@ -96,11 +96,11 @@ def detect_garbled_text(text: str) -> dict:
     return result
 
 
-def convert_page_to_jpg(page: fitz.Page, output_path: str, dpi: int = 200) -> str:
+def convert_page_to_jpg(page: fitz.Page, output_path: str, dpi: int = 200) -> tuple[str, int, int]:
     mat = fitz.Matrix(dpi / 72, dpi / 72)
     pix = page.get_pixmap(matrix=mat)
     pix.save(output_path)
-    return output_path
+    return output_path, pix.width, pix.height
 
 
 def save_single_page_pdf(doc: fitz.Document, page_idx: int, output_path: str) -> str:
@@ -145,7 +145,7 @@ def prepare_pages(file_path: str, doc_dir: str) -> list[dict]:
         jpg_path = str(doc_dir_path / f"page_{i + 1}.jpg")
         single_pdf_path = str(doc_dir_path / f"page_{i + 1}.pdf")
 
-        convert_page_to_jpg(page, jpg_path)
+        _, jpg_width, jpg_height = convert_page_to_jpg(page, jpg_path)
         save_single_page_pdf(doc, i, single_pdf_path)
 
         scanned = is_page_scanned(page)
@@ -154,6 +154,8 @@ def prepare_pages(file_path: str, doc_dir: str) -> list[dict]:
             "page_number": i + 1,
             "width": width,
             "height": height,
+            "jpg_width": jpg_width,
+            "jpg_height": jpg_height,
             "is_scanned": scanned,
             "jpg_path": jpg_path,
             "single_pdf_path": single_pdf_path,

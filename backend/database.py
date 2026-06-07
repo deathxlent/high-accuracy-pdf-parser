@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS pdf_pages (
     page_number INTEGER NOT NULL,
     width REAL NOT NULL DEFAULT 0,
     height REAL NOT NULL DEFAULT 0,
+    jpg_width REAL NOT NULL DEFAULT 0,
+    jpg_height REAL NOT NULL DEFAULT 0,
     is_scanned INTEGER NOT NULL DEFAULT 0,
     jpg_path TEXT,
     single_pdf_path TEXT,
@@ -61,6 +63,17 @@ def _now():
 async def init_db():
     async with aiosqlite.connect(str(DB_PATH)) as db:
         await db.executescript(CREATE_TABLES_SQL)
+        
+        try:
+            await db.execute("ALTER TABLE pdf_pages ADD COLUMN jpg_width REAL NOT NULL DEFAULT 0")
+        except aiosqlite.OperationalError:
+            pass
+        
+        try:
+            await db.execute("ALTER TABLE pdf_pages ADD COLUMN jpg_height REAL NOT NULL DEFAULT 0")
+        except aiosqlite.OperationalError:
+            pass
+        
         await db.commit()
 
 
@@ -102,13 +115,14 @@ async def list_documents() -> list[dict]:
 
 
 async def create_page(document_id: int, page_number: int, width: float, height: float,
+                      jpg_width: float = 0, jpg_height: float = 0,
                       jpg_path: str = None, single_pdf_path: str = None) -> int:
     async with aiosqlite.connect(str(DB_PATH)) as db:
         cursor = await db.execute(
             """INSERT INTO pdf_pages
-               (document_id, page_number, width, height, is_scanned, jpg_path, single_pdf_path, status, created_at)
-               VALUES (?, ?, ?, ?, 0, ?, ?, 'pending', ?)""",
-            (document_id, page_number, width, height, jpg_path, single_pdf_path, _now()),
+               (document_id, page_number, width, height, jpg_width, jpg_height, is_scanned, jpg_path, single_pdf_path, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'pending', ?)""",
+            (document_id, page_number, width, height, jpg_width, jpg_height, jpg_path, single_pdf_path, _now()),
         )
         await db.commit()
         return cursor.lastrowid

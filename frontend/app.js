@@ -477,17 +477,23 @@ function renderAnnotations(elements, canvasWidth, canvasHeight) {
     if (!currentPageData) return;
 
     const page = currentPageData;
-    const pageWidth = page.width || canvasWidth;
-    const pageHeight = page.height || canvasHeight;
+    let jpgWidth = page.jpg_width;
+    let jpgHeight = page.jpg_height;
+    if (!jpgWidth || !jpgHeight) {
+        jpgWidth = page.width * 200 / 72;
+        jpgHeight = page.height * 200 / 72;
+    }
+    if (!jpgWidth) jpgWidth = canvasWidth;
+    if (!jpgHeight) jpgHeight = canvasHeight;
 
     clearAnnotations();
 
     elements.forEach(elem => {
-        const scaleX = canvasWidth / pageWidth;
-        const scaleY = canvasHeight / pageHeight;
+        const scaleX = canvasWidth / jpgWidth;
+        const scaleY = canvasHeight / jpgHeight;
 
         const x = elem.bbox_x0 * scaleX;
-        const y = (pageHeight - elem.bbox_y1) * scaleY;
+        const y = elem.bbox_y0 * scaleY;
         const w = (elem.bbox_x1 - elem.bbox_x0) * scaleX;
         const h = (elem.bbox_y1 - elem.bbox_y0) * scaleY;
 

@@ -55,6 +55,8 @@ async def process_document(doc_id: int):
                 page_info["page_number"],
                 page_info["width"],
                 page_info["height"],
+                page_info["jpg_width"],
+                page_info["jpg_height"],
                 page_info["jpg_path"],
                 page_info["single_pdf_path"],
             )
@@ -239,6 +241,8 @@ async def get_parse_results(doc_id: int) -> dict:
             "page_number": page["page_number"],
             "width": page["width"],
             "height": page["height"],
+            "jpg_width": page["jpg_width"],
+            "jpg_height": page["jpg_height"],
             "is_scanned": bool(page["is_scanned"]),
             "status": page["status"],
             "elements": [],
@@ -246,8 +250,12 @@ async def get_parse_results(doc_id: int) -> dict:
 
         for elem in elements:
             page_data["elements"].append({
-                "type": elem["element_type"],
-                "bbox": [elem["bbox_x0"], elem["bbox_y0"], elem["bbox_x1"], elem["bbox_y1"]],
+                "id": elem["id"],
+                "element_type": elem["element_type"],
+                "bbox_x0": elem["bbox_x0"],
+                "bbox_y0": elem["bbox_y0"],
+                "bbox_x1": elem["bbox_x1"],
+                "bbox_y1": elem["bbox_y1"],
                 "confidence": elem["confidence"],
                 "reading_order": elem["reading_order"],
                 "content": elem["content"],
@@ -279,7 +287,7 @@ def _build_markdown(pages: list[dict]) -> str:
         elements = sorted(page["elements"], key=lambda e: e["reading_order"])
 
         for elem in elements:
-            etype = elem["type"]
+            etype = elem["element_type"]
             content = elem.get("content", "") or ""
             content_format = elem.get("content_format", "") or ""
 

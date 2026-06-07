@@ -72,6 +72,8 @@ async def get_status(doc_id: int):
             "page_number": p["page_number"],
             "width": p["width"],
             "height": p["height"],
+            "jpg_width": p["jpg_width"],
+            "jpg_height": p["jpg_height"],
             "status": p["status"],
             "is_scanned": bool(p["is_scanned"]),
             "jpg_path": p["jpg_path"],
@@ -223,7 +225,4 @@ async def get_page_pdf(page_id: int):
     return {"error": "No single PDF available"}, 404
 
 
-@router.get("/pages/{page_id}/elements")
-async def get_page_elements_api(page_id: int):
-    elements = await db.get_elements(page_id)
-    return {"elements": elements}
+

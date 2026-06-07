@@ -396,7 +396,6 @@ async function loadPage(index) {
 
         await renderPdfPage(page);
         renderElements();
-        clearAnnotations();
     } catch (e) {
         console.error('Failed to load page:', e);
         currentElements = [];

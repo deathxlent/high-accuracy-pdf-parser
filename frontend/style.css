@@ -682,6 +682,7 @@ body {
     overflow: hidden;
     transition: all 0.2s;
     background: white;
+    flex-shrink: 0;
 }
 
 .element-card:hover {
@@ -768,6 +769,11 @@ body {
     font-size: 0.88rem;
     line-height: 1.6;
     cursor: pointer;
+    max-height: none;
+    min-height: 2rem;
+    white-space: normal;
+    word-wrap: break-word;
+    overflow: visible;
 }
 
 .element-content.markdown h1,

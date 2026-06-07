@@ -131,10 +131,8 @@ async def reparse_document(doc_id: int):
     if doc["status"] == "processing":
         return {"message": "Already processing", "document_id": doc_id}
 
-    pages = await db.get_pages(doc_id)
-    for page in pages:
-        await db.execute_query("DELETE FROM page_elements WHERE page_id = ?", (page["id"],))
-        await db.update_page(page["id"], status="pending")
+    await db.execute_query("DELETE FROM page_elements WHERE page_id IN (SELECT id FROM pdf_pages WHERE document_id = ?)", (doc_id,))
+    await db.execute_query("DELETE FROM pdf_pages WHERE document_id = ?", (doc_id,))
 
     await db.update_document(doc_id, status="uploaded", error_message=None)
 
@@ -187,6 +185,12 @@ async def reorder_elements(page_id: int, data: dict):
         await db.commit()
 
     return {"message": "Elements reordered", "page_id": page_id}
+
+
+@router.get("/pages/{page_id}/elements")
+async def get_page_elements(page_id: int):
+    elements = await db.get_elements(page_id)
+    return {"elements": elements}
 
 
 @router.get("/documents/{doc_id}/thumbnail")

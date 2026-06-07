@@ -23,6 +23,17 @@ function init() {
     setupDropZone();
     setupViewToggle();
     handleRoute();
+    
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            const hash = window.location.hash || '#/home';
+            if (hash.startsWith('#/detail/') && currentPageData && currentElements) {
+                renderPdfPage(currentPageData);
+            }
+        }, 100);
+    });
 }
 
 function setupRouter() {
@@ -409,6 +420,25 @@ async function renderPdfPage(page) {
     const canvas = $('#pdf-canvas');
     const ctx = canvas.getContext('2d');
     const annotationLayer = $('#annotation-layer');
+    const container = $('#pdf-container');
+
+    function updateAnnotationLayer() {
+        const canvasRect = canvas.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        
+        const displayWidth = canvasRect.width;
+        const displayHeight = canvasRect.height;
+        
+        const offsetX = canvasRect.left - containerRect.left;
+        const offsetY = canvasRect.top - containerRect.top;
+        
+        annotationLayer.style.left = offsetX + 'px';
+        annotationLayer.style.top = offsetY + 'px';
+        annotationLayer.style.width = displayWidth + 'px';
+        annotationLayer.style.height = displayHeight + 'px';
+        
+        return { displayWidth, displayHeight };
+    }
 
     try {
         if (page.single_pdf_path) {
@@ -421,16 +451,16 @@ async function renderPdfPage(page) {
             canvas.width = viewport.width;
             canvas.height = viewport.height;
 
-            annotationLayer.style.width = viewport.width + 'px';
-            annotationLayer.style.height = viewport.height + 'px';
-
             await pdfPage.render({
                 canvasContext: ctx,
                 viewport: viewport
             }).promise;
 
-            clearAnnotations();
-            renderAnnotations(currentElements, viewport.width, viewport.height);
+            requestAnimationFrame(() => {
+                const { displayWidth, displayHeight } = updateAnnotationLayer();
+                clearAnnotations();
+                renderAnnotations(currentElements, viewport.width, viewport.height, displayWidth, displayHeight);
+            });
         } else if (page.jpg_path) {
             const img = new Image();
             img.onload = () => {
@@ -438,11 +468,11 @@ async function renderPdfPage(page) {
                 canvas.height = img.height * currentScale;
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-                annotationLayer.style.width = canvas.width + 'px';
-                annotationLayer.style.height = canvas.height + 'px';
-
-                clearAnnotations();
-                renderAnnotations(currentElements, canvas.width, canvas.height);
+                requestAnimationFrame(() => {
+                    const { displayWidth, displayHeight } = updateAnnotationLayer();
+                    clearAnnotations();
+                    renderAnnotations(currentElements, canvas.width, canvas.height, displayWidth, displayHeight);
+                });
             };
             img.src = `${API}/api/file/${encodeURIComponent(page.jpg_path)}`;
         } else {
@@ -454,6 +484,11 @@ async function renderPdfPage(page) {
             ctx.font = '16px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText('暂无页面预览', 300, 400);
+            
+            requestAnimationFrame(() => {
+                const { displayWidth, displayHeight } = updateAnnotationLayer();
+                clearAnnotations();
+            });
         }
     } catch (e) {
         console.error('Failed to render PDF:', e);
@@ -472,7 +507,7 @@ function clearAnnotations() {
     $('#annotation-layer').innerHTML = '';
 }
 
-function renderAnnotations(elements, canvasWidth, canvasHeight) {
+function renderAnnotations(elements, canvasWidth, canvasHeight, displayWidth, displayHeight) {
     const layer = $('#annotation-layer');
     if (!currentPageData) return;
 
@@ -486,11 +521,14 @@ function renderAnnotations(elements, canvasWidth, canvasHeight) {
     if (!jpgWidth) jpgWidth = canvasWidth;
     if (!jpgHeight) jpgHeight = canvasHeight;
 
+    const dispW = displayWidth || canvasWidth;
+    const dispH = displayHeight || canvasHeight;
+
     clearAnnotations();
 
     elements.forEach(elem => {
-        const scaleX = canvasWidth / jpgWidth;
-        const scaleY = canvasHeight / jpgHeight;
+        const scaleX = dispW / jpgWidth;
+        const scaleY = dispH / jpgHeight;
 
         const x = elem.bbox_x0 * scaleX;
         const y = elem.bbox_y0 * scaleY;

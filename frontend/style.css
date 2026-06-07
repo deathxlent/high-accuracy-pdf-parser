@@ -626,17 +626,17 @@ body {
 }
 .annotation-box.type-title::before { background: var(--type-title); }
 
-.annotation-box.type-section {
+.annotation-box.type-section-header {
     border-color: var(--type-section);
     background: rgba(236, 72, 153, 0.1);
 }
-.annotation-box.type-section::before { background: var(--type-section); }
+.annotation-box.type-section-header::before { background: var(--type-section); }
 
-.annotation-box.type-list {
+.annotation-box.type-list-item {
     border-color: var(--type-list);
     background: rgba(249, 115, 22, 0.1);
 }
-.annotation-box.type-list::before { background: var(--type-list); }
+.annotation-box.type-list-item::before { background: var(--type-list); }
 
 .annotation-box.type-table {
     border-color: var(--type-table);
@@ -644,17 +644,41 @@ body {
 }
 .annotation-box.type-table::before { background: var(--type-table); }
 
-.annotation-box.type-figure {
+.annotation-box.type-picture {
     border-color: var(--type-figure);
     background: rgba(6, 182, 212, 0.1);
 }
-.annotation-box.type-figure::before { background: var(--type-figure); }
+.annotation-box.type-picture::before { background: var(--type-figure); }
 
 .annotation-box.type-formula {
     border-color: var(--type-formula);
     background: rgba(239, 68, 68, 0.1);
 }
 .annotation-box.type-formula::before { background: var(--type-formula); }
+
+.annotation-box.type-caption {
+    border-color: #8b5cf6;
+    background: rgba(139, 92, 246, 0.1);
+}
+.annotation-box.type-caption::before { background: #8b5cf6; }
+
+.annotation-box.type-footnote {
+    border-color: #6b7280;
+    background: rgba(107, 114, 128, 0.1);
+}
+.annotation-box.type-footnote::before { background: #6b7280; }
+
+.annotation-box.type-page-header {
+    border-color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+}
+.annotation-box.type-page-header::before { background: #f59e0b; }
+
+.annotation-box.type-page-footer {
+    border-color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+}
+.annotation-box.type-page-footer::before { background: #f59e0b; }
 
 .annotation-box.active {
     border-width: 3px;
@@ -746,11 +770,15 @@ body {
 
 .element-type.text { background: var(--type-text); }
 .element-type.title { background: var(--type-title); }
-.element-type.section { background: var(--type-section); }
-.element-type.list { background: var(--type-list); }
+.element-type.section-header { background: var(--type-section); }
+.element-type.list-item { background: var(--type-list); }
 .element-type.table { background: var(--type-table); }
-.element-type.figure { background: var(--type-figure); }
+.element-type.picture { background: var(--type-figure); }
 .element-type.formula { background: var(--type-formula); }
+.element-type.caption { background: #8b5cf6; }
+.element-type.footnote { background: #6b7280; }
+.element-type.page-header { background: #f59e0b; }
+.element-type.page-footer { background: #f59e0b; }
 
 .element-order {
     font-size: 0.75rem;

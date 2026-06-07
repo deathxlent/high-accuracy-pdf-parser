@@ -388,6 +388,8 @@ async function loadPage(index) {
 
     $('#pdf-page-info').textContent = `第 ${page.page_number} 页`;
 
+    activeElementId = null;
+
     try {
         const res = await fetch(API + '/api/pages/' + page.id + '/elements');
         const data = await res.json();
@@ -478,18 +480,19 @@ function renderAnnotations(elements, canvasWidth, canvasHeight) {
     const pageWidth = page.width || canvasWidth;
     const pageHeight = page.height || canvasHeight;
 
-    elements.forEach(elem => {
+    clearAnnotations();
 
+    elements.forEach(elem => {
         const scaleX = canvasWidth / pageWidth;
         const scaleY = canvasHeight / pageHeight;
 
         const x = elem.bbox_x0 * scaleX;
-        const y = elem.bbox_y0 * scaleY;
+        const y = (pageHeight - elem.bbox_y1) * scaleY;
         const w = (elem.bbox_x1 - elem.bbox_x0) * scaleX;
         const h = (elem.bbox_y1 - elem.bbox_y0) * scaleY;
 
         const box = document.createElement('div');
-        box.className = `annotation-box type-${elem.element_type.toLowerCase()} ${activeElementId === elem.id ? 'active' : ''}`;
+        box.className = `annotation-box type-${elem.element_type.toLowerCase()} hidden`;
         box.dataset.type = elem.element_type;
         box.dataset.elementId = elem.id;
         box.style.left = x + 'px';
@@ -497,19 +500,30 @@ function renderAnnotations(elements, canvasWidth, canvasHeight) {
         box.style.width = w + 'px';
         box.style.height = h + 'px';
 
-        box.addEventListener('click', () => {
+        box.addEventListener('click', (e) => {
+            e.stopPropagation();
             highlightElement(elem.id);
         });
 
         layer.appendChild(box);
     });
+
+    if (activeElementId) {
+        const activeBox = document.querySelector(`.annotation-box[data-element-id="${activeElementId}"]`);
+        if (activeBox) {
+            activeBox.classList.remove('hidden');
+            activeBox.classList.add('active');
+        }
+    }
 }
 
 function highlightElement(elementId) {
     activeElementId = elementId;
 
     $$('.annotation-box').forEach(box => {
-        box.classList.toggle('active', parseInt(box.dataset.elementId) === elementId);
+        const isActive = parseInt(box.dataset.elementId) === elementId;
+        box.classList.toggle('hidden', !isActive);
+        box.classList.toggle('active', isActive);
     });
 
     $$('.element-card').forEach(card => {
@@ -540,6 +554,8 @@ function renderElements() {
 
         if (isImage && elem.content) {
             contentHtml = `<img src="${API}/api/file/${encodeURIComponent(elem.content)}" alt="图片">`;
+        } else if (elem.content_format === 'html') {
+            contentHtml = elem.content || '(空)';
         } else if (elem.content_format === 'latex') {
             contentHtml = `<code>${escapeHtml(elem.content || '(空)')}</code>`;
         } else {
@@ -625,7 +641,7 @@ function openEditModal(elementId) {
     if (!elem) return;
 
     editingElementId = elementId;
-    $('#edit-type').value = elem.element_type.toLowerCase();
+    $('#edit-type').value = elem.element_type;
     $('#edit-content').value = elem.content || '';
     $('#edit-modal').classList.remove('hidden');
 }
@@ -705,7 +721,7 @@ async function saveOrder() {
         const res = await fetch(API + '/api/pages/' + currentPageData.id + '/elements/reorder', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ element_order })
+            body: JSON.stringify({ element_order: elementOrder })
         });
 
         if (!res.ok) throw new Error('Failed to reorder elements');

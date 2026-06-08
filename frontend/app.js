@@ -60,6 +60,11 @@ function handleRoute() {
         progressPollInterval = null;
     }
 
+    if (isAddElementMode) {
+        toggleAddElementMode();
+    }
+    clearSelection();
+
     if (route === 'home') {
         $('#page-home').classList.add('active');
         document.querySelector('.nav-item[data-route="home"]').classList.add('active');
@@ -471,6 +476,11 @@ async function loadPage(index) {
     $('#pdf-page-info').textContent = `第 ${page.page_number} 页`;
 
     activeElementId = null;
+    
+    if (isAddElementMode) {
+        toggleAddElementMode();
+    }
+    clearSelection();
 
     try {
         const res = await fetch(API + '/api/pages/' + page.id + '/elements');

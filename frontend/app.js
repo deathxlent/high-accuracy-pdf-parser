@@ -1095,16 +1095,16 @@ function handleSelectionEnd(e) {
         return;
     }
     
-    const pdfCoords = screenToPdfCoords(screenX0, screenY0, screenX1, screenY1);
-    if (pdfCoords) {
-        selectedBbox = pdfCoords;
+    const jpgCoords = screenToJpgCoords(screenX0, screenY0, screenX1, screenY1);
+    if (jpgCoords) {
+        selectedBbox = jpgCoords;
         openAddElementModal();
     }
     
     selectionRect.style.display = 'none';
 }
 
-function screenToPdfCoords(screenX0, screenY0, screenX1, screenY1) {
+function screenToJpgCoords(screenX0, screenY0, screenX1, screenY1) {
     const canvas = $('#pdf-canvas');
     if (!canvas || !currentPageData) return null;
     
@@ -1124,8 +1124,6 @@ function screenToPdfCoords(screenX0, screenY0, screenX1, screenY1) {
     
     const jpgWidth = currentPageData.jpg_width;
     const jpgHeight = currentPageData.jpg_height;
-    const pdfWidth = currentPageData.width;
-    const pdfHeight = currentPageData.height;
     
     const scaleX = jpgWidth / canvasWidth;
     const scaleY = jpgHeight / canvasHeight;
@@ -1135,17 +1133,12 @@ function screenToPdfCoords(screenX0, screenY0, screenX1, screenY1) {
     const jpgX1 = Math.min(jpgWidth, canvasX1 * scaleX);
     const jpgY1 = Math.min(jpgHeight, canvasY1 * scaleY);
     
-    const pdfX0 = (jpgX0 / jpgWidth) * pdfWidth;
-    const pdfY0 = (jpgY0 / jpgHeight) * pdfHeight;
-    const pdfX1 = (jpgX1 / jpgWidth) * pdfWidth;
-    const pdfY1 = (jpgY1 / jpgHeight) * pdfHeight;
-    
     console.log('Screen coords:', { screenX0, screenY0, screenX1, screenY1 });
     console.log('Canvas coords:', { canvasX0, canvasY0, canvasX1, canvasY1 });
-    console.log('JPG coords:', { jpgX0, jpgY0, jpgX1, jpgY1 });
-    console.log('PDF coords:', { pdfX0, pdfY0, pdfX1, pdfY1 });
+    console.log('JPG coords (to save):', { jpgX0, jpgY0, jpgX1, jpgY1 });
+    console.log('Scale:', { scaleX, scaleY, jpgWidth, jpgHeight, canvasWidth, canvasHeight });
     
-    return [pdfX0, pdfY0, pdfX1, pdfY1];
+    return [jpgX0, jpgY0, jpgX1, jpgY1];
 }
 
 function clearSelection() {
@@ -1159,12 +1152,18 @@ function clearSelection() {
 function openAddElementModal() {
     if (!selectedBbox) return;
     
-    const bboxStr = `(${selectedBbox[0].toFixed(2)}, ${selectedBbox[1].toFixed(2)}, ${selectedBbox[2].toFixed(2)}, ${selectedBbox[3].toFixed(2)})`;
+    const bboxToSave = [...selectedBbox];
+    
+    const bboxStr = `(${bboxToSave[0].toFixed(2)}, ${bboxToSave[1].toFixed(2)}, ${bboxToSave[2].toFixed(2)}, ${bboxToSave[3].toFixed(2)})`;
     $('#add-element-bbox').textContent = bboxStr;
     $('#add-element-content').value = '';
     $('#add-element-type').value = 'Text';
     $('#add-element-save-btn').disabled = false;
     $('#add-element-modal').classList.remove('hidden');
+    
+    pendingNewElement = {
+        bbox: bboxToSave
+    };
     
     toggleAddElementMode();
 }
@@ -1176,13 +1175,17 @@ function closeAddElementModal() {
 }
 
 async function saveNewElement() {
-    if (!selectedBbox || !currentPageData) {
+    if (!pendingNewElement || !pendingNewElement.bbox || !currentPageData) {
         alert('请先框选区域');
         return;
     }
     
     const elementType = $('#add-element-type').value;
     const content = $('#add-element-content').value;
+    const bbox = pendingNewElement.bbox;
+    
+    console.log('Saving new element with JPG bbox:', bbox);
+    console.log('Current page jpg dimensions:', { width: currentPageData.jpg_width, height: currentPageData.jpg_height });
     
     try {
         const res = await fetch(API + '/api/pages/' + currentPageData.id + '/elements', {
@@ -1190,7 +1193,7 @@ async function saveNewElement() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 element_type: elementType,
-                bbox: selectedBbox,
+                bbox: bbox,
                 content: content,
                 content_format: 'markdown',
                 confidence: 1.0

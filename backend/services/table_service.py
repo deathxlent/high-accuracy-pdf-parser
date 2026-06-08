@@ -356,13 +356,15 @@ def _find_valid_table(pdf_page: fitz.Page, rect: fitz.Rect) -> tuple:
     每个策略检测到表格后都会进行有效性验证。
     """
     # 稍微扩大检测区域，避免边界截断导致的行/列丢失
-    # 上下左右各扩大3个PDF点（约10像素@150DPI）
-    expansion = 3.0
+    # 左右各扩大3个PDF点，顶部扩大3个点，底部扩大20个点（layout边界检测经常截断底部内容）
+    expansion_x = 3.0
+    expansion_y_top = 3.0
+    expansion_y_bottom = 20.0
     expanded_rect = fitz.Rect(
-        max(0, rect.x0 - expansion),
-        max(0, rect.y0 - expansion),
-        min(pdf_page.rect.x1, rect.x1 + expansion),
-        min(pdf_page.rect.y1, rect.y1 + expansion),
+        max(0, rect.x0 - expansion_x),
+        max(0, rect.y0 - expansion_y_top),
+        min(pdf_page.rect.x1, rect.x1 + expansion_x),
+        min(pdf_page.rect.y1, rect.y1 + expansion_y_bottom),
     )
     
     strategies = ["lines", "lines_strict", "text"]
@@ -435,13 +437,15 @@ def extract_table_from_native(pdf_page: fitz.Page,
         rect = pdf_page.rect
 
     # 稍微扩大检测区域，避免边界截断导致的行/列丢失
-    # 上下左右各扩大3个PDF点（约10像素@150DPI）
+    # 左右各扩大3个PDF点，顶部扩大3个点，底部扩大20个点（layout边界检测经常截断底部内容）
     if bbox is not None:
-        expansion = 3.0
-        rect.x0 = max(0, rect.x0 - expansion)
-        rect.y0 = max(0, rect.y0 - expansion)
-        rect.x1 = min(pdf_page.rect.x1, rect.x1 + expansion)
-        rect.y1 = min(pdf_page.rect.y1, rect.y1 + expansion)
+        expansion_x = 3.0
+        expansion_y_top = 3.0
+        expansion_y_bottom = 20.0
+        rect.x0 = max(0, rect.x0 - expansion_x)
+        rect.y0 = max(0, rect.y0 - expansion_y_top)
+        rect.x1 = min(pdf_page.rect.x1, rect.x1 + expansion_x)
+        rect.y1 = min(pdf_page.rect.y1, rect.y1 + expansion_y_bottom)
 
     # 边界检查
     if rect.is_empty or not rect.is_valid:

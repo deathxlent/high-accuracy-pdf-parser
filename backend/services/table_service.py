@@ -23,9 +23,9 @@ from backend.services.pdf_service import jpg_bbox_to_pdf_bbox, DEFAULT_DPI
 logger = logging.getLogger(__name__)
 
 # PyMuPDF find_tables 配置参数
-TABLE_STRATEGY = "lines_strict"  # 严格基于线条检测，适合规整表格
-SNAP_TOLERANCE = 5               # 线条吸附容差（像素）
-JOIN_TOLERANCE = 5               # 线条连接容差（像素）
+TABLE_STRATEGY = "lines"         # 基于线条检测，比lines_strict宽松，能检测到无线框但有分隔线的表格
+SNAP_TOLERANCE = 2               # 线条吸附容差（像素）
+JOIN_TOLERANCE = 2               # 线条连接容差（像素）
 
 
 def _parse_span_num(cell_start: float, cell_end: float, indexes: list[float],
@@ -78,7 +78,63 @@ def _parse_span_num(cell_start: float, cell_end: float, indexes: list[float],
     return max(1, span)
 
 
-def _table_to_html(table) -> str:
+def _validate_table(table, cell_data: list) -> bool:
+    """
+    验证检测到的表格是否为真正的表格，过滤误检测（如图表、标题区域等）。
+    
+    验证规则:
+        1. 行数 >= 3（排除只有表头或只有2行的误检测）
+        2. 列数 >= 2（排除单列的误检测）
+        3. 数据行中至少有一定比例的单元格有内容
+        4. 排除所有单元格内容都很短（<2个字符）且无数字的情况（可能是图表标签）
+    
+    Args:
+        table: PyMuPDF Table 对象
+        cell_data: 提取的单元格数据
+    
+    Returns:
+        True 表示是有效表格，False 表示是误检测
+    """
+    if not cell_data or len(cell_data) < 3:
+        return False
+    
+    col_count = len(cell_data[0]) if cell_data else 0
+    if col_count < 2:
+        return False
+    
+    # 统计有内容的单元格比例
+    total_cells = 0
+    non_empty_cells = 0
+    has_numeric = False
+    
+    for row in cell_data:
+        for cell in row:
+            if cell is None:
+                continue
+            total_cells += 1
+            cell_text = str(cell).strip()
+            if cell_text:
+                non_empty_cells += 1
+                # 检查是否包含数字
+                if any(c.isdigit() for c in cell_text):
+                    has_numeric = True
+    
+    if total_cells == 0:
+        return False
+    
+    # 非空单元格比例需要 >= 30%
+    non_empty_ratio = non_empty_cells / total_cells
+    if non_empty_ratio < 0.3:
+        return False
+    
+    # 至少要有一些数字（排除纯文本标签区域）
+    if not has_numeric and table.row_count < 5:
+        return False
+    
+    return True
+
+
+def _table_to_html(table, force_no_header: bool = False) -> str:
     """
     将 PyMuPDF Table 对象转换为 HTML 表格。
 
@@ -91,6 +147,7 @@ def _table_to_html(table) -> str:
 
     Args:
         table: PyMuPDF Table 对象（来自 page.find_tables()）
+        force_no_header: 强制不识别表头（用于跨页接续的表格）
 
     Returns:
         HTML 表格字符串，如果没有数据则返回空字符串
@@ -102,11 +159,12 @@ def _table_to_html(table) -> str:
     row_count = len(cell_data)
     col_count = len(cell_data[0])
 
-    # 检测表头行：使用第一行中最小的y1作为表头分界
-    # 注意：第一行可能包含跨行单元格（y1很大），所以取最小的y1
-    # 即没有跨行的单元格的底部，作为表头行的实际结束位置
+    # 检测表头行
     header_y1 = None
-    if table.header and table.header.cells and table.rows:
+    if not force_no_header and table.header and table.header.cells and table.rows:
+        # 使用第一行中最小的y1作为表头分界
+        # 注意：第一行可能包含跨行单元格（y1很大），所以取最小的y1
+        # 即没有跨行的单元格的底部，作为表头行的实际结束位置
         first_row = table.rows[0]
         valid_cells = [c for c in first_row.cells if c is not None]
         if valid_cells:
@@ -170,12 +228,13 @@ def _table_to_html(table) -> str:
             # 获取单元格文本
             cell_value = cell_data[row_idx][col_idx] or ""
 
-            # 判断是否为表头：y1 <= header_y1 或是第一行且header_y1为None
+            # 判断是否为表头
             is_header = False
-            if header_y1 is not None:
-                is_header = (y1 <= header_y1 + 1)  # 允许1像素容差
-            else:
-                is_header = (row_idx == 0)
+            if not force_no_header:
+                if header_y1 is not None:
+                    is_header = (y1 <= header_y1 + 1)  # 允许1像素容差
+                else:
+                    is_header = (row_idx == 0)
 
             tag = "th" if is_header else "td"
 
@@ -285,24 +344,77 @@ def _markdown_to_html_simple(md: str) -> str:
     return "\n".join(html_parts)
 
 
+def _find_valid_table(pdf_page: fitz.Page, rect: fitz.Rect) -> tuple:
+    """
+    使用多级策略查找有效的表格。
+    
+    策略优先级:
+        1. lines策略（宽松的线条检测）
+        2. lines_strict策略（严格的线条检测）
+        3. text策略（基于文本排列检测，可能不准确）
+    
+    每个策略检测到表格后都会进行有效性验证。
+    """
+    # 稍微扩大检测区域，避免边界截断导致的行/列丢失
+    # 上下左右各扩大3个PDF点（约10像素@150DPI）
+    expansion = 3.0
+    expanded_rect = fitz.Rect(
+        max(0, rect.x0 - expansion),
+        max(0, rect.y0 - expansion),
+        min(pdf_page.rect.x1, rect.x1 + expansion),
+        min(pdf_page.rect.y1, rect.y1 + expansion),
+    )
+    
+    strategies = ["lines", "lines_strict", "text"]
+    
+    for strategy in strategies:
+        try:
+            finder = pdf_page.find_tables(
+                clip=expanded_rect,
+                strategy=strategy,
+                snap_tolerance=SNAP_TOLERANCE,
+                join_tolerance=JOIN_TOLERANCE,
+            )
+            
+            if not finder.tables:
+                continue
+            
+            # 遍历所有检测到的表格，找第一个有效的
+            for table in finder.tables:
+                cell_data = table.extract()
+                if _validate_table(table, cell_data):
+                    logger.info(f"Using '{strategy}' strategy, found valid table: {table.row_count}x{table.col_count}")
+                    return table, cell_data, strategy
+            
+            logger.debug(f"Strategy '{strategy}' found tables but none passed validation")
+            
+        except Exception as e:
+            logger.debug(f"Strategy '{strategy}' failed: {e}")
+            continue
+    
+    return None, None, None
+
+
 def extract_table_from_native(pdf_page: fitz.Page,
                               bbox: tuple[float, float, float, float] | None,
                               bbox_is_jpg: bool = True,
-                              dpi: int = DEFAULT_DPI) -> dict:
+                              dpi: int = DEFAULT_DPI,
+                              force_no_header: bool = False) -> dict:
     """
     从非扫描 PDF 页面提取表格（使用 PyMuPDF 原生方案）。
 
     流程:
         1. 坐标转换: 如果传入的是 JPG 像素坐标，先转为 PDF 点坐标
-        2. 表格检测: 使用 page.find_tables() 在指定区域内检测表格
+        2. 表格检测: 使用多级策略（lines → lines_strict → text）检测有效表格
         3. HTML 生成: 将检测到的表格转换为带 rowspan/colspan 的 HTML
-        4. Fallback: 如果未检测到表格，尝试从纯文本构建 HTML
+        4. Fallback: 如果未检测到有效表格，尝试从纯文本构建 HTML
 
     Args:
         pdf_page: PyMuPDF Page 对象
         bbox: 表格区域坐标 (x1, y1, x2, y2)，传 None 则检测整页
         bbox_is_jpg: bbox 是否为 JPG 像素坐标（默认 True，会自动转换）
         dpi: JPG 图片的 DPI，用于坐标转换（默认 200）
+        force_no_header: 强制不识别表头（用于跨页接续的表格）
 
     Returns:
         字典包含:
@@ -310,6 +422,7 @@ def extract_table_from_native(pdf_page: fitz.Page,
             - markdown: Markdown 格式的表格（fallback）
             - rows: 行数
             - cols: 列数
+            - strategy: 使用的检测策略
     """
     # ── 步骤1: 坐标转换 ──────────────────────────────────────────────
     if bbox is not None and bbox_is_jpg:
@@ -321,27 +434,27 @@ def extract_table_from_native(pdf_page: fitz.Page,
     else:
         rect = pdf_page.rect
 
+    # 稍微扩大检测区域，避免边界截断导致的行/列丢失
+    # 上下左右各扩大3个PDF点（约10像素@150DPI）
+    if bbox is not None:
+        expansion = 3.0
+        rect.x0 = max(0, rect.x0 - expansion)
+        rect.y0 = max(0, rect.y0 - expansion)
+        rect.x1 = min(pdf_page.rect.x1, rect.x1 + expansion)
+        rect.y1 = min(pdf_page.rect.y1, rect.y1 + expansion)
+
     # 边界检查
     if rect.is_empty or not rect.is_valid:
         logger.warning(f"Invalid table bbox: {bbox}")
-        return {"html": "", "markdown": "", "rows": 0, "cols": 0}
+        return {"html": "", "markdown": "", "rows": 0, "cols": 0, "strategy": "none"}
 
-    # ── 步骤2: 使用 PyMuPDF 检测表格 ────────────────────────────────
-    try:
-        finder = pdf_page.find_tables(
-            clip=rect,
-            strategy=TABLE_STRATEGY,
-            snap_tolerance=SNAP_TOLERANCE,
-            join_tolerance=JOIN_TOLERANCE,
-        )
-    except Exception as e:
-        logger.error(f"PyMuPDF find_tables failed: {e}")
-        return {"html": "", "markdown": "", "rows": 0, "cols": 0}
+    # ── 步骤2: 使用多级策略检测有效表格 ────────────────────────────────
+    table, cell_data, strategy = _find_valid_table(pdf_page, rect)
 
     # ── 步骤3: 处理检测结果 ─────────────────────────────────────────
-    if not finder.tables:
-        # 未检测到表格，fallback 到纯文本解析
-        logger.debug("No tables detected by find_tables, trying text fallback")
+    if table is None:
+        # 未检测到有效表格，fallback 到纯文本解析
+        logger.debug("No valid tables detected, trying text fallback")
         text = pdf_page.get_text("text", clip=rect)
         html = _text_to_html_table(text)
         # 粗略估算行列数
@@ -354,16 +467,12 @@ def extract_table_from_native(pdf_page: fitz.Page,
             "markdown": "",
             "rows": len(lines),
             "cols": cols,
+            "strategy": "text_fallback",
         }
 
-    # 取第一个表格（一般一个区域只有一个表格）
-    table = finder.tables[0]
-    if len(finder.tables) > 1:
-        logger.info(f"Found {len(finder.tables)} tables in region, using first one")
-
-    # ── 步骤4: 生成 HTML（参考 old-code 的 _parse_2_html_and_extract_text） ──
+    # ── 步骤4: 生成 HTML ──
     try:
-        html = _table_to_html(table)
+        html = _table_to_html(table, force_no_header=force_no_header)
     except Exception as e:
         logger.warning(f"Table to HTML conversion failed: {e}")
         html = ""
@@ -380,6 +489,7 @@ def extract_table_from_native(pdf_page: fitz.Page,
         "markdown": markdown,
         "rows": table.row_count,
         "cols": table.col_count,
+        "strategy": strategy,
     }
 
 

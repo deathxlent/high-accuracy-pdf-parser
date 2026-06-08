@@ -121,13 +121,18 @@ async def process_document(doc_id: int):
                     logger.error(f"Failed to assign reading order for page {page['page_number']}: {e}")
                     page["_elements"] = []
 
+        # 用于跨页表格检测：记录前一页最后一个表格的特征
+        prev_page_table_info = None
+        
         for i, page in enumerate(pages):
             try:
                 set_parse_progress(doc_id, "parsing_content", 55 + (i / total_pages) * 40, 
                                   f"解析页面 {page['page_number']}/{total_pages}")
-                await _parse_page(doc_id, page, doc_dir)
+                current_page_table_info = await _parse_page(doc_id, page, doc_dir, prev_page_table_info)
+                prev_page_table_info = current_page_table_info
             except Exception as e:
                 logger.error(f"Failed to parse page {page['page_number']}: {e}")
+                prev_page_table_info = None
                 await db.update_page(page["id"], status="failed", error_message=str(e))
 
         set_parse_progress(doc_id, "completed", 100, "解析完成")
@@ -140,12 +145,54 @@ async def process_document(doc_id: int):
         await db.update_document(doc_id, status="failed", error_message=str(e))
 
 
-async def _parse_page(doc_id: int, page_info: dict, doc_dir: str):
+def _is_continuation_table(curr_table_cols: int, curr_first_row: list, 
+                          prev_table_cols: int, prev_last_row: list) -> bool:
+    """
+    判断当前表格是否是前一页表格的接续。
+    
+    判断规则:
+        1. 列数必须相同
+        2. 第一列的内容风格相似（都是数据行，不是表头）
+        3. 前一页最后一行和当前页第一行的非空单元格数量相似
+    
+    注意: 这是一个启发式判断，可能有误判，但可以处理大多数标准表格的跨页接续。
+    """
+    # 列数必须相同
+    if curr_table_cols != prev_table_cols:
+        return False
+    
+    # 检查第一列是否为空或包含数据（不是表头）
+    # 如果第一列为空（常见于rowspan接续）或包含数字/普通文本，可能是接续
+    curr_first_col = str(curr_first_row[0]).strip() if curr_first_row and curr_first_row[0] else ""
+    prev_last_col = str(prev_last_row[0]).strip() if prev_last_row and prev_last_row[0] else ""
+    
+    # 如果前一页最后一行第一列是跨行的（空），且当前页第一行第一列也是空的，很可能是接续
+    if not curr_first_col and not prev_last_col:
+        return True
+    
+    # 如果前一页最后一行有数据，当前页第一行也有数据，且列数相同，可能是接续
+    # 检查是否有数字（数据行特征）
+    def has_digit(s: str) -> bool:
+        return any(c.isdigit() for c in s)
+    
+    prev_has_digit = any(has_digit(str(c)) for c in prev_last_row if c)
+    curr_has_digit = any(has_digit(str(c)) for c in curr_first_row if c)
+    
+    if prev_has_digit and curr_has_digit:
+        return True
+    
+    return False
+
+
+async def _parse_page(doc_id: int, page_info: dict, doc_dir: str, prev_page_table_info: dict = None):
     page_id = page_info["id"]
     jpg_path = page_info["jpg_path"]
     single_pdf_path = page_info["single_pdf_path"]
     is_scanned = page_info["is_scanned"]
     elements = page_info.get("_elements", [])
+    
+    # 记录当前页最后一个表格的信息，用于下一页跨页检测
+    current_page_last_table_info = None
 
     await db.update_page(page_id, status="parsing_content")
 
@@ -243,14 +290,64 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str):
                 content_format = "image_path"
 
             elif elem_type == "Table":
+                # 检测是否是跨页接续的表格
+                force_no_header = False
+                if prev_page_table_info is not None:
+                    # 先用PyMuPDF检测表格结构（不提取内容，只检测列数和第一行
+                    try:
+                        from backend.services.table_service import _find_valid_table
+                        from backend.services.pdf_service import jpg_bbox_to_pdf_bbox, DEFAULT_DPI
+
+                        # 转换坐标
+                        pdf_bbox = jpg_bbox_to_pdf_bbox(bbox, DEFAULT_DPI)
+                        rect = fitz.Rect(pdf_bbox)
+                        preview_table, preview_data, _ = _find_valid_table(pdf_page, rect)
+                        
+                        if preview_table and preview_data:
+                            is_cont = _is_continuation_table(
+                                preview_table.col_count,
+                                preview_data[0],
+                                prev_page_table_info["col_count"],
+                                prev_page_table_info["last_row"]
+                            )
+                            if is_cont:
+                                logger.info(f"Page {page_info['page_number']}: 检测到跨页接续表格，强制不识别表头")
+                                force_no_header = True
+                    except Exception as e:
+                        logger.debug(f"跨页表格检测失败: {e}")
+                
                 if elem_idx in table_results:
                     result = table_results[elem_idx]
                 else:
                     result = await asyncio.to_thread(
-                        extract_table_from_native, pdf_page, bbox
+                        extract_table_from_native, pdf_page, bbox, 
+                        True, DEFAULT_DPI, force_no_header
                     )
                 content = result.get("html", "") or result.get("markdown", "")
                 content_format = "html" if result.get("html") else "markdown"
+                
+                # 记录当前表格信息用于下一页跨页检测
+                # 记录列数最多的表格（而不是最后一个），用于更准确的跨页接续检测
+                try:
+                    # 获取表格数据
+                    from backend.services.table_service import _find_valid_table
+                    from backend.services.pdf_service import jpg_bbox_to_pdf_bbox, DEFAULT_DPI
+                    
+                    pdf_bbox = jpg_bbox_to_pdf_bbox(bbox, DEFAULT_DPI)
+                    rect = fitz.Rect(pdf_bbox)
+                    info_table, info_data, _ = _find_valid_table(pdf_page, rect)
+                    
+                    if info_table and info_data:
+                        # 如果当前还没有记录，或者当前表格列数更多，则更新记录
+                        if (current_page_last_table_info is None or 
+                            info_table.col_count > current_page_last_table_info["col_count"]):
+                            current_page_last_table_info = {
+                                "col_count": info_table.col_count,
+                                "last_row": info_data[-1],
+                                "page_number": page_info["page_number"],
+                            }
+                except Exception as e:
+                    logger.debug(f"记录表格信息失败: {e}")
 
             parsed_results.append({
                 "elem_type": elem_type,
@@ -290,6 +387,8 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str):
     pdf_doc.close()
     await db.update_page(page_id, status="completed")
     logger.info(f"Page {page_info['page_number']}: parsing completed")
+    
+    return current_page_last_table_info
 
 
 async def get_parse_results(doc_id: int) -> dict:

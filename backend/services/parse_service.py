@@ -191,6 +191,9 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str, prev_page_tabl
     is_scanned = page_info["is_scanned"]
     elements = page_info.get("_elements", [])
     
+    # 提前导入需要的模块，避免条件分支内导入导致的变量未定义问题
+    from backend.services.pdf_service import jpg_bbox_to_pdf_bbox, DEFAULT_DPI
+    
     # 记录当前页最后一个表格的信息，用于下一页跨页检测
     current_page_last_table_info = None
 
@@ -296,7 +299,6 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str, prev_page_tabl
                     # 先用PyMuPDF检测表格结构（不提取内容，只检测列数和第一行
                     try:
                         from backend.services.table_service import _find_valid_table
-                        from backend.services.pdf_service import jpg_bbox_to_pdf_bbox, DEFAULT_DPI
 
                         # 转换坐标
                         pdf_bbox = jpg_bbox_to_pdf_bbox(bbox, DEFAULT_DPI)
@@ -331,7 +333,6 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str, prev_page_tabl
                 try:
                     # 获取表格数据
                     from backend.services.table_service import _find_valid_table
-                    from backend.services.pdf_service import jpg_bbox_to_pdf_bbox, DEFAULT_DPI
                     
                     pdf_bbox = jpg_bbox_to_pdf_bbox(bbox, DEFAULT_DPI)
                     rect = fitz.Rect(pdf_bbox)

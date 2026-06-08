@@ -464,6 +464,52 @@ body {
     display: flex;
     align-items: center;
     gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.detail-progress {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--bg);
+    padding: 0.375rem 0.75rem;
+    border-radius: 8px;
+    flex: 1;
+    min-width: 200px;
+}
+
+.detail-progress-bar {
+    flex: 1;
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    min-width: 100px;
+}
+
+.detail-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), var(--primary-light));
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.detail-progress-text {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--primary);
+    min-width: 40px;
+    text-align: right;
+}
+
+.detail-progress-message {
+    font-size: 0.7rem;
+    color: var(--text-light);
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .detail-container {
@@ -889,11 +935,26 @@ body {
     border-top: 1px solid var(--border);
     display: flex;
     justify-content: flex-end;
+    gap: 0.375rem;
 }
 
 .edit-btn {
     padding: 0.25rem 0.625rem;
     font-size: 0.75rem;
+}
+
+.delete-btn {
+    padding: 0.25rem 0.625rem;
+    font-size: 0.75rem;
+    background: #fee2e2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+}
+
+.delete-btn:hover {
+    background: #ef4444;
+    color: white;
+    border-color: #ef4444;
 }
 
 .modal {
@@ -1046,4 +1107,87 @@ textarea.form-control {
     .detail-col {
         min-height: 400px;
     }
+}
+
+.modal-wide {
+    max-width: 900px;
+    width: 90%;
+}
+
+.bbox-display {
+    padding: 0.625rem 0.875rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: 'Consolas', monospace;
+    font-size: 0.85rem;
+    color: var(--text-light);
+}
+
+.raw-data-info {
+    margin-bottom: 0.75rem;
+    padding: 0.625rem 0.875rem;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 6px;
+    color: #0369a1;
+    font-weight: 500;
+    font-size: 0.85rem;
+}
+
+.raw-data-content {
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 1rem;
+    border-radius: 6px;
+    max-height: 500px;
+    overflow: auto;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    font-family: 'Consolas', monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.raw-data-content::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.raw-data-content::-webkit-scrollbar-track {
+    background: #334155;
+    border-radius: 4px;
+}
+
+.raw-data-content::-webkit-scrollbar-thumb {
+    background: #64748b;
+    border-radius: 4px;
+}
+
+.pdf-canvas-container {
+    position: relative;
+    cursor: default;
+    user-select: none;
+}
+
+.pdf-canvas-container.add-mode {
+    cursor: crosshair;
+}
+
+.selection-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.selection-rect {
+    position: absolute;
+    border: 2px solid #22c55e;
+    background: rgba(34, 197, 94, 0.15);
+    pointer-events: none;
+    border-radius: 2px;
 }

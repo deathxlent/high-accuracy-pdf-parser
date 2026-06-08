@@ -66,6 +66,13 @@
                 <h2 id="detail-title">文档详情</h2>
                 <div class="detail-actions">
                     <span id="detail-status" class="status-badge"></span>
+                    <div id="detail-progress-container" class="detail-progress hidden">
+                        <div class="detail-progress-bar">
+                            <div id="detail-progress-fill" class="detail-progress-fill"></div>
+                        </div>
+                        <span id="detail-progress-text" class="detail-progress-text">0%</span>
+                        <span id="detail-progress-message" class="detail-progress-message"></span>
+                    </div>
                     <button class="btn btn-primary" onclick="reparseDocument()">
                         <i class="fas fa-sync-alt"></i> 重解析
                     </button>
@@ -83,7 +90,7 @@
                         <span id="pdf-page-info">第 1 页</span>
                     </div>
                     <div class="pdf-wrapper">
-                        <div id="pdf-container" class="pdf-container">
+                        <div id="pdf-container" class="pdf-container pdf-canvas-container">
                             <canvas id="pdf-canvas"></canvas>
                             <div id="annotation-layer" class="annotation-layer"></div>
                         </div>
@@ -93,6 +100,12 @@
                     <div class="elements-header">
                         <span>解析结果</span>
                         <div class="elements-actions">
+                            <button id="add-element-btn" class="btn btn-success btn-sm" onclick="toggleAddElementMode()">
+                                <i class="fas fa-plus"></i> 添加元素
+                            </button>
+                            <button id="show-raw-btn" class="btn btn-outline btn-sm" onclick="showRawLayoutData()">
+                                <i class="fas fa-database"></i> 原始数据
+                            </button>
                             <button id="edit-order-btn" class="btn btn-outline btn-sm" onclick="toggleEditOrder()">
                                 <i class="fas fa-sort"></i> 变更排序
                             </button>
@@ -141,6 +154,65 @@
             <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeEditModal()">取消</button>
                 <button class="btn btn-primary" onclick="saveElementEdit()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="add-element-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>添加新元素</h3>
+                <button class="modal-close" onclick="closeAddElementModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>元素类型</label>
+                    <select id="add-element-type" class="form-control">
+                        <option value="Text">Text</option>
+                        <option value="Title">Title</option>
+                        <option value="Section-header">Section</option>
+                        <option value="List-item">List</option>
+                        <option value="Table">Table</option>
+                        <option value="Picture">Picture</option>
+                        <option value="Formula">Formula</option>
+                        <option value="Caption">Caption</option>
+                        <option value="Footnote">Footnote</option>
+                        <option value="Page-header">Page Header</option>
+                        <option value="Page-footer">Page Footer</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>框选位置 (PDF坐标)</label>
+                    <div class="bbox-display">
+                        <span id="add-element-bbox">请先在PDF上框选区域</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>内容 (Markdown)</label>
+                    <textarea id="add-element-content" class="form-control" rows="8" placeholder="请输入元素内容..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeAddElementModal()">取消</button>
+                <button class="btn btn-primary" id="add-element-save-btn" onclick="saveNewElement()" disabled>添加元素</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="raw-data-modal" class="modal hidden">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h3>Layout 模型原始检测数据</h3>
+                <button class="modal-close" onclick="closeRawDataModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="raw-data-info">
+                    <span id="raw-data-count"></span>
+                </div>
+                <pre id="raw-data-content" class="raw-data-content"></pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeRawDataModal()">关闭</button>
             </div>
         </div>
     </div>

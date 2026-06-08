@@ -14,6 +14,13 @@ let currentPdfDoc = null;
 let currentScale = 1.5;
 let activeElementId = null;
 let draggedElement = null;
+let progressPollInterval = null;
+let isAddElementMode = false;
+let selectionStart = null;
+let selectionRect = null;
+let selectionOverlay = null;
+let selectedBbox = null;
+let pendingNewElement = null;
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -48,6 +55,11 @@ function handleRoute() {
     $$('.page').forEach(p => p.classList.remove('active'));
     $$('.nav-item').forEach(n => n.classList.remove('active'));
 
+    if (progressPollInterval) {
+        clearInterval(progressPollInterval);
+        progressPollInterval = null;
+    }
+
     if (route === 'home') {
         $('#page-home').classList.add('active');
         document.querySelector('.nav-item[data-route="home"]').classList.add('active');
@@ -58,6 +70,52 @@ function handleRoute() {
         loadDocumentDetail(parseInt(parts[1]));
     } else {
         navigateTo('home');
+    }
+}
+
+
+function updateProgressDisplay(progress) {
+    const container = $('#detail-progress-container');
+    const fill = $('#detail-progress-fill');
+    const text = $('#detail-progress-text');
+    const message = $('#detail-progress-message');
+
+    if (!progress || progress.percent <= 0 || progress.percent >= 100) {
+        container.classList.add('hidden');
+        return;
+    }
+
+    container.classList.remove('hidden');
+    fill.style.width = progress.percent + '%';
+    text.textContent = progress.percent + '%';
+    message.textContent = progress.message || '';
+}
+
+
+async function pollProgress(docId) {
+    try {
+        const res = await fetch(API + '/api/progress/' + docId);
+        const data = await res.json();
+        
+        updateProgressDisplay(data.progress);
+        
+        if (data.status === 'completed' || data.status === 'failed') {
+            if (progressPollInterval) {
+                clearInterval(progressPollInterval);
+                progressPollInterval = null;
+            }
+            $('#detail-progress-container').classList.add('hidden');
+            
+            const statusEl = $('#detail-status');
+            statusEl.textContent = getStatusText(data.status);
+            statusEl.className = 'status-badge status-' + data.status;
+            
+            if (data.status === 'completed') {
+                loadDocumentDetail(docId);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to poll progress:', e);
     }
 }
 
@@ -336,6 +394,11 @@ async function loadDocumentDetail(docId) {
     activeElementId = null;
     isEditOrderMode = false;
 
+    if (progressPollInterval) {
+        clearInterval(progressPollInterval);
+        progressPollInterval = null;
+    }
+
     try {
         const [docRes, pagesRes, resultsRes] = await Promise.all([
             fetch(API + '/api/documents').then(r => r.json()),
@@ -356,6 +419,14 @@ async function loadDocumentDetail(docId) {
         const statusEl = $('#detail-status');
         statusEl.textContent = getStatusText(currentDocument.status);
         statusEl.className = 'status-badge status-' + currentDocument.status;
+
+        if (pagesRes.progress) {
+            updateProgressDisplay(pagesRes.progress);
+        }
+
+        if (currentDocument.status === 'processing' || currentDocument.status.startsWith('parsing')) {
+            progressPollInterval = setInterval(() => pollProgress(docId), 1000);
+        }
 
         renderThumbnails();
 
@@ -631,6 +702,9 @@ function renderElements() {
                     <button class="btn btn-outline btn-sm edit-btn" onclick="event.stopPropagation(); openEditModal(${elem.id})">
                         <i class="fas fa-edit"></i> 编辑
                     </button>
+                    <button class="btn btn-outline btn-sm delete-btn" onclick="event.stopPropagation(); deleteElement(${elem.id})">
+                        <i class="fas fa-trash"></i> 删除
+                    </button>
                 </div>
             </div>
         `;
@@ -839,8 +913,17 @@ async function reparseDocument() {
         const res = await fetch(API + '/api/reparse/' + currentDocId, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed to start reparsing');
+        
+        if (progressPollInterval) {
+            clearInterval(progressPollInterval);
+        }
+        progressPollInterval = setInterval(() => pollProgress(currentDocId), 1000);
+        
+        const statusEl = $('#detail-status');
+        statusEl.textContent = getStatusText('processing');
+        statusEl.className = 'status-badge status-processing';
+        
         alert('重解析已开始，请稍候...');
-        loadDocumentDetail(currentDocId);
     } catch (e) {
         alert('启动重解析失败: ' + e.message);
     }
@@ -856,11 +939,303 @@ document.addEventListener('DOMContentLoaded', init);
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         closeEditModal();
+        closeAddElementModal();
+        closeRawDataModal();
+        if (isAddElementMode) {
+            toggleAddElementMode();
+        }
     }
 });
 
 $('#edit-modal').addEventListener('click', (e) => {
     if (e.target.id === 'edit-modal') {
         closeEditModal();
+    }
+});
+
+async function deleteElement(elementId) {
+    if (!confirm('确定要删除这个元素吗？')) return;
+    
+    try {
+        const res = await fetch(API + '/api/elements/' + elementId, {
+            method: 'DELETE'
+        });
+        
+        if (!res.ok) throw new Error('Failed to delete element');
+        
+        currentElements = currentElements.filter(e => e.id !== elementId);
+        if (activeElementId === elementId) {
+            clearHighlights();
+            activeElementId = null;
+        }
+        renderElements();
+        
+        console.log('Element deleted:', elementId);
+    } catch (e) {
+        alert('删除失败: ' + e.message);
+    }
+}
+
+function toggleAddElementMode() {
+    isAddElementMode = !isAddElementMode;
+    const canvasContainer = $('.pdf-canvas-container');
+    const addBtn = $('#add-element-btn');
+    
+    if (isAddElementMode) {
+        canvasContainer.classList.add('add-mode');
+        addBtn.innerHTML = '<i class="fas fa-times"></i> 取消添加';
+        addBtn.classList.remove('btn-success');
+        addBtn.classList.add('btn-danger');
+        setupSelectionHandlers();
+    } else {
+        canvasContainer.classList.remove('add-mode');
+        addBtn.innerHTML = '<i class="fas fa-plus"></i> 添加元素';
+        addBtn.classList.remove('btn-danger');
+        addBtn.classList.add('btn-success');
+        clearSelection();
+        removeSelectionHandlers();
+    }
+}
+
+function setupSelectionHandlers() {
+    const canvasContainer = $('.pdf-canvas-container');
+    if (!canvasContainer) return;
+    
+    if (!selectionOverlay) {
+        selectionOverlay = document.createElement('div');
+        selectionOverlay.className = 'selection-overlay';
+        canvasContainer.appendChild(selectionOverlay);
+        
+        selectionRect = document.createElement('div');
+        selectionRect.className = 'selection-rect';
+        selectionRect.style.display = 'none';
+        selectionOverlay.appendChild(selectionRect);
+    }
+    
+    selectionOverlay.style.pointerEvents = 'auto';
+    selectionOverlay.addEventListener('mousedown', handleSelectionStart);
+    selectionOverlay.addEventListener('mousemove', handleSelectionMove);
+    selectionOverlay.addEventListener('mouseup', handleSelectionEnd);
+    selectionOverlay.addEventListener('mouseleave', handleSelectionEnd);
+}
+
+function removeSelectionHandlers() {
+    if (!selectionOverlay) return;
+    
+    selectionOverlay.style.pointerEvents = 'none';
+    selectionOverlay.removeEventListener('mousedown', handleSelectionStart);
+    selectionOverlay.removeEventListener('mousemove', handleSelectionMove);
+    selectionOverlay.removeEventListener('mouseup', handleSelectionEnd);
+    selectionOverlay.removeEventListener('mouseleave', handleSelectionEnd);
+}
+
+function handleSelectionStart(e) {
+    if (!isAddElementMode) return;
+    
+    const rect = selectionOverlay.getBoundingClientRect();
+    selectionStart = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+    };
+    
+    selectionRect.style.display = 'block';
+    selectionRect.style.left = selectionStart.x + 'px';
+    selectionRect.style.top = selectionStart.y + 'px';
+    selectionRect.style.width = '0px';
+    selectionRect.style.height = '0px';
+}
+
+function handleSelectionMove(e) {
+    if (!isAddElementMode || !selectionStart) return;
+    
+    const rect = selectionOverlay.getBoundingClientRect();
+    const currentX = e.clientX - rect.left;
+    const currentY = e.clientY - rect.top;
+    
+    const left = Math.min(selectionStart.x, currentX);
+    const top = Math.min(selectionStart.y, currentY);
+    const width = Math.abs(currentX - selectionStart.x);
+    const height = Math.abs(currentY - selectionStart.y);
+    
+    selectionRect.style.left = left + 'px';
+    selectionRect.style.top = top + 'px';
+    selectionRect.style.width = width + 'px';
+    selectionRect.style.height = height + 'px';
+}
+
+function handleSelectionEnd(e) {
+    if (!isAddElementMode || !selectionStart) return;
+    
+    const rect = selectionOverlay.getBoundingClientRect();
+    const endX = e.clientX - rect.left;
+    const endY = e.clientY - rect.top;
+    
+    const screenX0 = Math.min(selectionStart.x, endX);
+    const screenY0 = Math.min(selectionStart.y, endY);
+    const screenX1 = Math.max(selectionStart.x, endX);
+    const screenY1 = Math.max(selectionStart.y, endY);
+    
+    const width = screenX1 - screenX0;
+    const height = screenY1 - screenY0;
+    
+    selectionStart = null;
+    
+    if (width < 10 || height < 10) {
+        selectionRect.style.display = 'none';
+        return;
+    }
+    
+    const pdfCoords = screenToPdfCoords(screenX0, screenY0, screenX1, screenY1);
+    if (pdfCoords) {
+        selectedBbox = pdfCoords;
+        openAddElementModal();
+    }
+    
+    selectionRect.style.display = 'none';
+}
+
+function screenToPdfCoords(screenX0, screenY0, screenX1, screenY1) {
+    const canvas = $('#pdf-canvas');
+    if (!canvas || !currentPageData) return null;
+    
+    const canvasRect = canvas.getBoundingClientRect();
+    const containerRect = $('.pdf-canvas-container').getBoundingClientRect();
+    
+    const offsetX = canvasRect.left - containerRect.left;
+    const offsetY = canvasRect.top - containerRect.top;
+    
+    const canvasX0 = screenX0 - offsetX;
+    const canvasY0 = screenY0 - offsetY;
+    const canvasX1 = screenX1 - offsetX;
+    const canvasY1 = screenY1 - offsetY;
+    
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
+    
+    const jpgWidth = currentPageData.jpg_width;
+    const jpgHeight = currentPageData.jpg_height;
+    const pdfWidth = currentPageData.width;
+    const pdfHeight = currentPageData.height;
+    
+    const scaleX = jpgWidth / canvasWidth;
+    const scaleY = jpgHeight / canvasHeight;
+    
+    const jpgX0 = Math.max(0, canvasX0 * scaleX);
+    const jpgY0 = Math.max(0, canvasY0 * scaleY);
+    const jpgX1 = Math.min(jpgWidth, canvasX1 * scaleX);
+    const jpgY1 = Math.min(jpgHeight, canvasY1 * scaleY);
+    
+    const pdfX0 = (jpgX0 / jpgWidth) * pdfWidth;
+    const pdfY0 = (jpgY0 / jpgHeight) * pdfHeight;
+    const pdfX1 = (jpgX1 / jpgWidth) * pdfWidth;
+    const pdfY1 = (jpgY1 / jpgHeight) * pdfHeight;
+    
+    console.log('Screen coords:', { screenX0, screenY0, screenX1, screenY1 });
+    console.log('Canvas coords:', { canvasX0, canvasY0, canvasX1, canvasY1 });
+    console.log('JPG coords:', { jpgX0, jpgY0, jpgX1, jpgY1 });
+    console.log('PDF coords:', { pdfX0, pdfY0, pdfX1, pdfY1 });
+    
+    return [pdfX0, pdfY0, pdfX1, pdfY1];
+}
+
+function clearSelection() {
+    if (selectionRect) {
+        selectionRect.style.display = 'none';
+    }
+    selectionStart = null;
+    selectedBbox = null;
+}
+
+function openAddElementModal() {
+    if (!selectedBbox) return;
+    
+    const bboxStr = `(${selectedBbox[0].toFixed(2)}, ${selectedBbox[1].toFixed(2)}, ${selectedBbox[2].toFixed(2)}, ${selectedBbox[3].toFixed(2)})`;
+    $('#add-element-bbox').textContent = bboxStr;
+    $('#add-element-content').value = '';
+    $('#add-element-type').value = 'Text';
+    $('#add-element-save-btn').disabled = false;
+    $('#add-element-modal').classList.remove('hidden');
+    
+    toggleAddElementMode();
+}
+
+function closeAddElementModal() {
+    $('#add-element-modal').classList.add('hidden');
+    selectedBbox = null;
+    pendingNewElement = null;
+}
+
+async function saveNewElement() {
+    if (!selectedBbox || !currentPageData) {
+        alert('请先框选区域');
+        return;
+    }
+    
+    const elementType = $('#add-element-type').value;
+    const content = $('#add-element-content').value;
+    
+    try {
+        const res = await fetch(API + '/api/pages/' + currentPageData.id + '/elements', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                element_type: elementType,
+                bbox: selectedBbox,
+                content: content,
+                content_format: 'markdown',
+                confidence: 1.0
+            })
+        });
+        
+        if (!res.ok) throw new Error('Failed to create element');
+        
+        const newElement = await res.json();
+        currentElements.push(newElement);
+        renderElements();
+        closeAddElementModal();
+        
+        alert('元素添加成功');
+    } catch (e) {
+        alert('添加元素失败: ' + e.message);
+    }
+}
+
+async function showRawLayoutData() {
+    if (!currentPageData) return;
+    
+    try {
+        const res = await fetch(API + '/api/pages/' + currentPageData.id + '/layout-raw');
+        if (!res.ok) throw new Error('Failed to get raw layout data');
+        
+        const data = await res.json();
+        
+        $('#raw-data-count').textContent = `共检测到 ${data.count} 个原始元素`;
+        
+        const formattedData = data.raw_detections.map((det, idx) => {
+            return `#${idx} ${det.element_type} (class_id: ${det.class_id}, conf: ${det.confidence.toFixed(3)})\n` +
+                   `  bbox: (${det.bbox.map(v => v.toFixed(2)).join(', ')})`;
+        }).join('\n\n');
+        
+        $('#raw-data-content').textContent = formattedData || '没有检测到原始数据';
+        $('#raw-data-modal').classList.remove('hidden');
+        
+    } catch (e) {
+        alert('获取原始数据失败: ' + e.message);
+    }
+}
+
+function closeRawDataModal() {
+    $('#raw-data-modal').classList.add('hidden');
+}
+
+$('#add-element-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'add-element-modal') {
+        closeAddElementModal();
+    }
+});
+
+$('#raw-data-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'raw-data-modal') {
+        closeRawDataModal();
     }
 });

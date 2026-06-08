@@ -6,7 +6,7 @@ from backend import database as db
 from backend.services.pdf_service import (
     validate_pdf, prepare_pages, extract_text_in_region, detect_garbled_text
 )
-from backend.services.layout_service import detect_layout_batch
+from backend.services.layout_service import detect_layout_batch, deduplicate_header_footer
 from backend.services.order_service import assign_reading_order, assign_reading_order_batch
 from backend.services.ocr_service import ocr_region, ocr_formula, ocr_batch, ocr_batch_multi_image
 from backend.services.table_service import extract_table_from_native, extract_table_from_scanned
@@ -14,8 +14,34 @@ from backend.services.picture_service import extract_picture
 
 logger = logging.getLogger(__name__)
 
+_parse_progress: dict[int, dict] = {}
+
 TEXT_TYPES = {"Caption", "Footnote", "List-item", "Page-footer", "Page-header",
               "Section-header", "Text", "Title"}
+
+
+def set_parse_progress(doc_id: int, stage: str, percent: float, message: str = ""):
+    _parse_progress[doc_id] = {
+        "stage": stage,
+        "percent": round(percent, 1),
+        "message": message,
+        "updated_at": _get_progress_time()
+    }
+    logger.info(f"Parse progress for doc {doc_id}: {percent:.1f}% - {stage} - {message}")
+
+
+def get_parse_progress(doc_id: int) -> dict:
+    return _parse_progress.get(doc_id, {"stage": "idle", "percent": 0, "message": ""})
+
+
+def clear_parse_progress(doc_id: int):
+    if doc_id in _parse_progress:
+        del _parse_progress[doc_id]
+
+
+def _get_progress_time() -> str:
+    from datetime import datetime
+    return datetime.now().isoformat()
 
 
 async def process_upload(file_path: str, original_filename: str) -> dict:
@@ -40,16 +66,21 @@ async def process_document(doc_id: int):
     doc_info = await db.get_document(doc_id)
     if not doc_info:
         logger.error(f"Document {doc_id} not found")
+        clear_parse_progress(doc_id)
         return
 
-    await db.update_document(doc_id, status="processing")
-
     try:
+        set_parse_progress(doc_id, "initializing", 5, "开始处理文档")
+        await db.update_document(doc_id, status="processing")
+
         file_path = doc_info["file_path"]
         doc_dir = str(Path(file_path).parent / Path(file_path).stem)
+        
+        set_parse_progress(doc_id, "preparing_pages", 10, "准备页面数据")
         pages_info = await asyncio.to_thread(prepare_pages, file_path, doc_dir)
+        total_pages = len(pages_info)
 
-        for page_info in pages_info:
+        for i, page_info in enumerate(pages_info):
             page_id = await db.create_page(
                 doc_id,
                 page_info["page_number"],
@@ -61,20 +92,23 @@ async def process_document(doc_id: int):
                 page_info["single_pdf_path"],
             )
             await db.update_page(page_id, is_scanned=1 if page_info["is_scanned"] else 0)
+            set_parse_progress(doc_id, "preparing_pages", 10 + (i + 1) / total_pages * 20, 
+                              f"创建页面 {page_info['page_number']}/{total_pages}")
 
         await db.update_document(doc_id, status="pages_ready")
 
         pages = await db.get_pages(doc_id)
 
-        all_elements = []
         all_jpg_paths = []
         for page in pages:
             jpg_path = page["jpg_path"]
             all_jpg_paths.append(jpg_path)
 
+        set_parse_progress(doc_id, "parsing_layout", 35, "批量检测布局...")
         logger.info("Batch detecting layouts for all pages...")
         layouts = await asyncio.to_thread(detect_layout_batch, all_jpg_paths)
 
+        set_parse_progress(doc_id, "parsing_layout", 50, "分配阅读顺序...")
         logger.info("Batch assigning reading orders for all pages...")
         layouts_with_order = await asyncio.to_thread(
             assign_reading_order_batch, layouts, all_jpg_paths
@@ -87,17 +121,22 @@ async def process_document(doc_id: int):
                     logger.error(f"Failed to assign reading order for page {page['page_number']}: {e}")
                     page["_elements"] = []
 
-        for page in pages:
+        for i, page in enumerate(pages):
             try:
+                set_parse_progress(doc_id, "parsing_content", 55 + (i / total_pages) * 40, 
+                                  f"解析页面 {page['page_number']}/{total_pages}")
                 await _parse_page(doc_id, page, doc_dir)
             except Exception as e:
                 logger.error(f"Failed to parse page {page['page_number']}: {e}")
                 await db.update_page(page["id"], status="failed", error_message=str(e))
 
+        set_parse_progress(doc_id, "completed", 100, "解析完成")
         await db.update_document(doc_id, status="completed")
+        clear_parse_progress(doc_id)
 
     except Exception as e:
         logger.error(f"Failed to process document {doc_id}: {e}")
+        set_parse_progress(doc_id, "failed", 0, f"解析失败: {str(e)}")
         await db.update_document(doc_id, status="failed", error_message=str(e))
 
 
@@ -170,6 +209,9 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str):
             result = await asyncio.to_thread(extract_table_from_scanned, jpg_path, bbox)
             table_results[idx] = result
 
+    parsed_results = []
+    element_contents = {}
+
     for elem_idx, elem in enumerate(elements):
         elem_type = elem["element_type"]
         bbox = elem["bbox"]
@@ -210,16 +252,39 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str):
                 content = result.get("html", "") or result.get("markdown", "")
                 content_format = "html" if result.get("html") else "markdown"
 
-            await db.create_element(
-                page_id, elem_type, bbox, confidence, reading_order,
-                content=content, content_format=content_format
-            )
+            parsed_results.append({
+                "elem_type": elem_type,
+                "bbox": bbox,
+                "confidence": confidence,
+                "reading_order": reading_order,
+                "content": content,
+                "content_format": content_format,
+            })
+            element_contents[elem_idx] = content
 
         except Exception as e:
             logger.error(f"Failed to parse element {elem_type} at {bbox}: {e}")
+            parsed_results.append({
+                "elem_type": elem_type,
+                "bbox": bbox,
+                "confidence": confidence,
+                "reading_order": reading_order,
+                "content": f"[ERROR: {str(e)}]",
+                "content_format": "error",
+            })
+            element_contents[elem_idx] = ""
+
+    elements = deduplicate_header_footer(elements, element_contents)
+    
+    kept_bboxes = {(elem["bbox"], elem["element_type"]) for elem in elements}
+    
+    for idx, result in enumerate(parsed_results):
+        result_key = (result["bbox"], result["elem_type"])
+        if result_key in kept_bboxes:
             await db.create_element(
-                page_id, elem_type, bbox, confidence, reading_order,
-                content=f"[ERROR: {str(e)}]", content_format="error"
+                page_id, result["elem_type"], result["bbox"], 
+                result["confidence"], result["reading_order"],
+                content=result["content"], content_format=result["content_format"]
             )
 
     pdf_doc.close()

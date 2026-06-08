@@ -7,7 +7,8 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from backend.config import TMP_DIR, DB_PATH
 from backend import database as db
-from backend.services.parse_service import process_upload, process_document, get_parse_results
+from backend.services.parse_service import process_upload, process_document, get_parse_results, get_parse_progress
+from backend.services.layout_service import get_raw_layout_data
 
 router = APIRouter(prefix="/api")
 
@@ -82,11 +83,28 @@ async def get_status(doc_id: int):
         for p in pages
     ]
 
+    progress = get_parse_progress(doc_id)
+
     return {
         "document_id": doc_id,
         "status": doc["status"],
         "page_count": doc["page_count"],
         "pages": page_statuses,
+        "progress": progress,
+    }
+
+
+@router.get("/progress/{doc_id}")
+async def get_progress(doc_id: int):
+    doc = await db.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    progress = get_parse_progress(doc_id)
+    return {
+        "document_id": doc_id,
+        "status": doc["status"],
+        "progress": progress,
     }
 
 
@@ -223,6 +241,68 @@ async def get_page_pdf(page_id: int):
             return FileResponse(row["single_pdf_path"])
 
     return {"error": "No single PDF available"}, 404
+
+
+@router.get("/pages/{page_id}/layout-raw")
+async def get_page_raw_layout(page_id: int):
+    page = await db.get_page(page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    jpg_path = page.get("jpg_path", "")
+    raw_data = get_raw_layout_data(jpg_path)
+
+    return {
+        "page_id": page_id,
+        "jpg_path": jpg_path,
+        "raw_detections": raw_data,
+        "count": len(raw_data)
+    }
+
+
+@router.delete("/elements/{element_id}")
+async def delete_element(element_id: int):
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Element not found")
+
+        await db.execute("DELETE FROM page_elements WHERE id = ?", (element_id,))
+        await db.commit()
+
+    return {"message": "Element deleted", "element_id": element_id}
+
+
+@router.post("/pages/{page_id}/elements")
+async def create_element(page_id: int, data: dict):
+    page = await db.get_page(page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    element_type = data.get("element_type", "Text")
+    bbox = data.get("bbox")
+    content = data.get("content", "")
+    content_format = data.get("content_format", "markdown")
+    confidence = data.get("confidence", 1.0)
+
+    if not bbox or len(bbox) != 4:
+        raise HTTPException(status_code=400, detail="bbox is required and must have 4 values")
+
+    elements = await db.get_elements(page_id)
+    reading_order = len(elements)
+
+    element_id = await db.create_element(
+        page_id, element_type, tuple(bbox), confidence, reading_order,
+        content=content, content_format=content_format
+    )
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
+        row = await cursor.fetchone()
+        return dict(row)
 
 
 

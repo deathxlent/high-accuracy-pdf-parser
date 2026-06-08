@@ -9,6 +9,83 @@ logger = logging.getLogger(__name__)
 
 _model = None
 
+_raw_layout_data: dict[str, list[dict]] = {}
+
+
+def set_raw_layout_data(image_path: str, raw_data: list[dict]):
+    _raw_layout_data[image_path] = raw_data
+    logger.info(f"Raw layout data saved for {Path(image_path).name}: {len(raw_data)} raw detections")
+
+
+def get_raw_layout_data(image_path: str) -> list[dict]:
+    return _raw_layout_data.get(image_path, [])
+
+
+def clear_raw_layout_data(image_path: str):
+    if image_path in _raw_layout_data:
+        del _raw_layout_data[image_path]
+
+
+def _string_similarity(a: str, b: str) -> float:
+    if not a or not b:
+        return 0.0
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+
+def deduplicate_header_footer(elements: list[dict], contents: dict[int, str], similarity_threshold: float = 0.8) -> list[dict]:
+    header_footer_types = {"Page-header", "Page-footer"}
+    
+    header_footer_elems = [
+        (idx, elem) for idx, elem in enumerate(elements)
+        if elem["element_type"] in header_footer_types
+    ]
+    
+    if len(header_footer_elems) < 2:
+        return elements
+    
+    to_remove = set()
+    
+    for i in range(len(header_footer_elems)):
+        idx1, elem1 = header_footer_elems[i]
+        if idx1 in to_remove:
+            continue
+            
+        for j in range(i + 1, len(header_footer_elems)):
+            idx2, elem2 = header_footer_elems[j]
+            if idx2 in to_remove:
+                continue
+            
+            if elem1["element_type"] != elem2["element_type"]:
+                continue
+            
+            iou = _compute_iou(elem1["bbox"], elem2["bbox"])
+            if iou < 0.5:
+                continue
+            
+            content1 = contents.get(idx1, "")
+            content2 = contents.get(idx2, "")
+            
+            similarity = _string_similarity(content1, content2)
+            if similarity < similarity_threshold:
+                continue
+            
+            logger.info(f"Found overlapping {elem1['element_type']} (IoU={iou:.3f}, similarity={similarity:.3f})")
+            
+            if len(content1) >= len(content2):
+                to_remove.add(idx2)
+                logger.info(f"  Removing #{idx2} (len={len(content2)}), keeping #{idx1} (len={len(content1)})")
+            else:
+                to_remove.add(idx1)
+                logger.info(f"  Removing #{idx1} (len={len(content1)}), keeping #{idx2} (len={len(content2)})")
+                break
+    
+    if to_remove:
+        elements = [elem for idx, elem in enumerate(elements) if idx not in to_remove]
+        logger.info(f"Removed {len(to_remove)} duplicate header/footer elements")
+    
+    return elements
+
 
 def _compute_iou(box_a: tuple, box_b: tuple) -> float:
     x1 = max(box_a[0], box_b[0])
@@ -101,12 +178,15 @@ def detect_layout(image_path: str) -> list[dict]:
     results = model(image_path, imgsz=YOLO_IMG_SIZE, verbose=False)
 
     elements = []
+    raw_elements = []
     if not results:
+        set_raw_layout_data(image_path, [])
         return elements
 
     result = results[0]
     boxes = result.boxes
     if boxes is None:
+        set_raw_layout_data(image_path, [])
         return elements
 
     for i in range(len(boxes)):
@@ -117,12 +197,24 @@ def detect_layout(image_path: str) -> list[dict]:
 
         element_type = YOLO_CATEGORY_MAP.get(cls_id, f"Unknown-{cls_id}")
 
+        raw_elem = {
+            "element_type": element_type,
+            "bbox": (float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])),
+            "confidence": conf,
+            "class_id": cls_id,
+            "reading_order": -1,
+        }
+        raw_elements.append(raw_elem)
+
         elements.append({
             "element_type": element_type,
             "bbox": (float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])),
             "confidence": conf,
             "reading_order": -1,
         })
+
+    set_raw_layout_data(image_path, raw_elements)
+    logger.info(f"Raw layout data for {Path(image_path).name}: {len(raw_elements)} raw detections before filtering")
 
     elements = remove_overlapping_elements(elements)
     return elements
@@ -136,8 +228,11 @@ def detect_layout_batch(image_paths: list[str]) -> list[list[dict]]:
     results = model(image_paths, imgsz=YOLO_IMG_SIZE, verbose=False)
 
     all_elements = []
-    for result in results:
+    for result_idx, result in enumerate(results):
         elements = []
+        raw_elements = []
+        image_path = image_paths[result_idx] if result_idx < len(image_paths) else ""
+        
         boxes = result.boxes
         if boxes is not None:
             for i in range(len(boxes)):
@@ -146,12 +241,27 @@ def detect_layout_batch(image_paths: list[str]) -> list[list[dict]]:
                 conf = float(box.conf[0].cpu().numpy())
                 cls_id = int(box.cls[0].cpu().numpy())
                 element_type = YOLO_CATEGORY_MAP.get(cls_id, f"Unknown-{cls_id}")
+                
+                raw_elem = {
+                    "element_type": element_type,
+                    "bbox": (float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])),
+                    "confidence": conf,
+                    "class_id": cls_id,
+                    "reading_order": -1,
+                }
+                raw_elements.append(raw_elem)
+                
                 elements.append({
                     "element_type": element_type,
                     "bbox": (float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])),
                     "confidence": conf,
                     "reading_order": -1,
                 })
+        
+        if image_path:
+            set_raw_layout_data(image_path, raw_elements)
+            logger.info(f"Raw layout data for {Path(image_path).name}: {len(raw_elements)} raw detections before filtering")
+        
         elements = remove_overlapping_elements(elements)
         all_elements.append(elements)
 

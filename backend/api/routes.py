@@ -164,9 +164,9 @@ async def reparse_document(doc_id: int):
 
 @router.put("/elements/{element_id}")
 async def update_element(element_id: int, data: dict):
-    async with aiosqlite.connect(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
+    async with aiosqlite.connect(str(DB_PATH)) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
         row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Element not found")
@@ -182,10 +182,10 @@ async def update_element(element_id: int, data: dict):
         if updates:
             sets = ", ".join(f"{k} = ?" for k in updates)
             vals = list(updates.values()) + [element_id]
-            await db.execute(f"UPDATE page_elements SET {sets} WHERE id = ?", vals)
-            await db.commit()
+            await conn.execute(f"UPDATE page_elements SET {sets} WHERE id = ?", vals)
+            await conn.commit()
 
-        cursor = await db.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
+        cursor = await conn.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
         row = await cursor.fetchone()
         return dict(row)
 
@@ -196,13 +196,13 @@ async def reorder_elements(page_id: int, data: dict):
     if not element_order:
         raise HTTPException(status_code=400, detail="element_order is required")
 
-    async with aiosqlite.connect(str(DB_PATH)) as db:
+    async with aiosqlite.connect(str(DB_PATH)) as conn:
         for idx, elem_id in enumerate(element_order):
-            await db.execute(
+            await conn.execute(
                 "UPDATE page_elements SET reading_order = ? WHERE id = ? AND page_id = ?",
                 (idx, elem_id, page_id)
             )
-        await db.commit()
+        await conn.commit()
 
     return {"message": "Elements reordered", "page_id": page_id}
 
@@ -230,9 +230,9 @@ async def get_document_thumbnail(doc_id: int):
 
 @router.get("/pages/{page_id}/pdf")
 async def get_page_pdf(page_id: int):
-    async with aiosqlite.connect(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM pdf_pages WHERE id = ?", (page_id,))
+    async with aiosqlite.connect(str(DB_PATH)) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute("SELECT * FROM pdf_pages WHERE id = ?", (page_id,))
         row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Page not found")
@@ -262,15 +262,15 @@ async def get_page_raw_layout(page_id: int):
 
 @router.delete("/elements/{element_id}")
 async def delete_element(element_id: int):
-    async with aiosqlite.connect(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
+    async with aiosqlite.connect(str(DB_PATH)) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
         row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Element not found")
 
-        await db.execute("DELETE FROM page_elements WHERE id = ?", (element_id,))
-        await db.commit()
+        await conn.execute("DELETE FROM page_elements WHERE id = ?", (element_id,))
+        await conn.commit()
 
     return {"message": "Element deleted", "element_id": element_id}
 
@@ -298,9 +298,9 @@ async def create_element(page_id: int, data: dict):
         content=content, content_format=content_format
     )
 
-    async with aiosqlite.connect(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
+    async with aiosqlite.connect(str(DB_PATH)) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
         row = await cursor.fetchone()
         return dict(row)
 

@@ -1252,3 +1252,99 @@ $('#raw-data-modal').addEventListener('click', (e) => {
         closeRawDataModal();
     }
 });
+
+$('#annotation-image-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'annotation-image-modal') {
+        closeAnnotationImageModal();
+    }
+});
+
+async function showLayoutAnnotationImage() {
+    if (!currentPageData) return;
+
+    try {
+        const imgUrl = `${API}/api/pages/${currentPageData.id}/layout-annotation`;
+        $('#annotation-image').src = imgUrl + '?t=' + Date.now();
+        $('#annotation-image-modal').classList.remove('hidden');
+        closeRawDataModal();
+    } catch (e) {
+        alert('获取标注图片失败: ' + e.message);
+    }
+}
+
+function closeAnnotationImageModal() {
+    $('#annotation-image-modal').classList.add('hidden');
+    $('#annotation-image').src = '';
+}
+
+function exportDocumentHtml() {
+    if (!currentDocId) return;
+
+    const exportBtn = $('#export-html-btn');
+    const originalText = exportBtn.innerHTML;
+    exportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 导出中...';
+    exportBtn.disabled = true;
+
+    try {
+        const url = `${API}/api/documents/${currentDocId}/export/html`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.click();
+    } catch (e) {
+        alert('导出失败: ' + e.message);
+    } finally {
+        setTimeout(() => {
+            exportBtn.innerHTML = originalText;
+            exportBtn.disabled = false;
+        }, 1000);
+    }
+}
+
+function exportCurrentPageHtml() {
+    if (!currentPageData) return;
+
+    try {
+        const url = `${API}/api/pages/${currentPageData.id}/export/html`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.click();
+    } catch (e) {
+        alert('导出失败: ' + e.message);
+    }
+}
+
+function exportCurrentPageMarkdown() {
+    if (!currentPageData) return;
+
+    try {
+        const url = `${API}/api/pages/${currentPageData.id}/export/markdown`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.click();
+    } catch (e) {
+        alert('导出失败: ' + e.message);
+    }
+}
+
+function exportCurrentPagePdf() {
+    if (!currentPageData) return;
+
+    try {
+        const url = `${API}/api/pages/${currentPageData.id}/pdf`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.click();
+    } catch (e) {
+        alert('导出失败: ' + e.message);
+    }
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeAnnotationImageModal();
+    }
+});

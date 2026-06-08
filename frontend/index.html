@@ -73,6 +73,9 @@
                         <span id="detail-progress-text" class="detail-progress-text">0%</span>
                         <span id="detail-progress-message" class="detail-progress-message"></span>
                     </div>
+                    <button class="btn btn-success" onclick="exportDocumentHtml()" id="export-html-btn">
+                        <i class="fas fa-file-export"></i> 导出HTML
+                    </button>
                     <button class="btn btn-primary" onclick="reparseDocument()">
                         <i class="fas fa-sync-alt"></i> 重解析
                     </button>
@@ -88,6 +91,17 @@
                 <div class="detail-col detail-col-pdf">
                     <div class="pdf-header">
                         <span id="pdf-page-info">第 1 页</span>
+                        <div class="pdf-header-actions">
+                            <button class="btn btn-outline btn-sm" onclick="exportCurrentPageHtml()" title="导出当前页HTML">
+                                <i class="fas fa-file-code"></i> HTML
+                            </button>
+                            <button class="btn btn-outline btn-sm" onclick="exportCurrentPageMarkdown()" title="导出当前页Markdown">
+                                <i class="fas fa-file-alt"></i> MD
+                            </button>
+                            <button class="btn btn-outline btn-sm" onclick="exportCurrentPagePdf()" title="导出当前页PDF">
+                                <i class="fas fa-file-pdf"></i> PDF
+                            </button>
+                        </div>
                     </div>
                     <div class="pdf-wrapper">
                         <div id="pdf-container" class="pdf-container pdf-canvas-container">
@@ -208,11 +222,43 @@
             <div class="modal-body">
                 <div class="raw-data-info">
                     <span id="raw-data-count"></span>
+                    <button class="btn btn-primary btn-sm" onclick="showLayoutAnnotationImage()">
+                        <i class="fas fa-image"></i> 查看标注图片
+                    </button>
                 </div>
                 <pre id="raw-data-content" class="raw-data-content"></pre>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeRawDataModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="annotation-image-modal" class="modal hidden">
+        <div class="modal-content modal-extra-wide">
+            <div class="modal-header">
+                <h3>Layout 标注图片</h3>
+                <button class="modal-close" onclick="closeAnnotationImageModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="annotation-legend">
+                    <span class="legend-item"><span class="legend-color" style="background: #dc143c;"></span> Title</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #0000ff;"></span> Section</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #00bfff;"></span> Text</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #008000;"></span> List</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #ff4500;"></span> Table</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #ffd700;"></span> Picture</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #8a2be2;"></span> Formula</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #ffa500;"></span> Caption</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #808080;"></span> Footnote</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #ff00ff;"></span> Header/Footer</span>
+                </div>
+                <div class="annotation-image-container">
+                    <img id="annotation-image" src="" alt="标注图片" style="max-width: 100%; height: auto;">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeAnnotationImageModal()">关闭</button>
             </div>
         </div>
     </div>

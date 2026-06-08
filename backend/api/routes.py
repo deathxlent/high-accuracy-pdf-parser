@@ -4,11 +4,11 @@ import asyncio
 import aiosqlite
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, HTMLResponse
 from backend.config import TMP_DIR, DB_PATH
 from backend import database as db
-from backend.services.parse_service import process_upload, process_document, get_parse_results, get_parse_progress
-from backend.services.layout_service import get_raw_layout_data
+from backend.services.parse_service import process_upload, process_document, get_parse_results, get_parse_progress, TEXT_TYPES
+from backend.services.layout_service import get_raw_layout_data, generate_layout_annotation_image
 
 router = APIRouter(prefix="/api")
 
@@ -303,6 +303,248 @@ async def create_element(page_id: int, data: dict):
         cursor = await conn.execute("SELECT * FROM page_elements WHERE id = ?", (element_id,))
         row = await cursor.fetchone()
         return dict(row)
+
+
+@router.get("/pages/{page_id}/layout-annotation")
+async def get_page_layout_annotation(page_id: int):
+    page = await db.get_page(page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    jpg_path = page.get("jpg_path", "")
+    raw_data = get_raw_layout_data(jpg_path)
+
+    if not raw_data:
+        raise HTTPException(status_code=404, detail="No raw layout data available")
+
+    try:
+        image_bytes = generate_layout_annotation_image(jpg_path, raw_data)
+        return Response(content=image_bytes, media_type="image/png")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate annotation image: {str(e)}")
+
+
+@router.get("/documents/{doc_id}/export/html")
+async def export_document_html(doc_id: int):
+    result = await get_parse_results(doc_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+
+    pages = result["pages"]
+    doc = result["document"]
+
+    html_parts = [
+        "<!DOCTYPE html>",
+        "<html lang='zh-CN'>",
+        "<head>",
+        "<meta charset='UTF-8'>",
+        f"<title>{doc['original_filename']} - 解析结果</title>",
+        "<style>",
+        "body { font-family: 'Microsoft YaHei', Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; line-height: 1.6; }",
+        "h1 { color: #333; border-bottom: 3px solid #007bff; padding-bottom: 10px; margin-top: 40px; page-break-before: always; }",
+        "h1:first-child { page-break-before: auto; }",
+        "h2 { color: #555; margin-top: 20px; }",
+        "h3 { color: #666; }",
+        "table { border-collapse: collapse; width: 100%; margin: 10px 0; }",
+        "table, th, td { border: 1px solid #ddd; }",
+        "th, td { padding: 8px 12px; text-align: left; }",
+        "th { background-color: #f5f5f5; }",
+        "img { max-width: 100%; height: auto; margin: 10px 0; }",
+        "code { background-color: #f5f5f5; padding: 2px 6px; border-radius: 4px; font-family: Consolas, monospace; }",
+        ".page-header, .page-footer { color: #888; font-size: 0.9em; font-style: italic; }",
+        ".formula { text-align: center; font-size: 1.1em; margin: 15px 0; }",
+        ".caption { font-style: italic; color: #666; text-align: center; }",
+        "</style>",
+        "</head>",
+        "<body>",
+    ]
+
+    for page in pages:
+        page_num = page["page_number"]
+        html_parts.append(f"<h1>第 {page_num} 页</h1>")
+
+        elements = sorted(page["elements"], key=lambda e: e["reading_order"])
+
+        for elem in elements:
+            etype = elem["element_type"]
+            content = elem.get("content", "") or ""
+            content_format = elem.get("content_format", "") or ""
+
+            if etype == "Title":
+                html_parts.append(f"<h1 style='color: #dc143c;'>{content}</h1>")
+            elif etype == "Section-header":
+                html_parts.append(f"<h2>{content}</h2>")
+            elif etype == "Page-header":
+                html_parts.append(f"<div class='page-header'>{content}</div>")
+            elif etype == "Page-footer":
+                html_parts.append(f"<div class='page-footer'>{content}</div>")
+            elif etype == "Formula":
+                html_parts.append(f"<div class='formula'>{content}</div>")
+            elif etype == "Table":
+                if content_format == "html":
+                    html_parts.append(content)
+                else:
+                    html_parts.append(f"<pre>{content}</pre>")
+            elif etype == "Picture":
+                if content:
+                    html_parts.append(f'<img src="file://{content}" alt="Picture">')
+            elif etype == "Caption":
+                html_parts.append(f"<div class='caption'>{content}</div>")
+            elif etype == "List-item":
+                html_parts.append(f"<li>{content}</li>")
+            elif etype in TEXT_TYPES:
+                if content.strip():
+                    html_parts.append(f"<p>{content}</p>")
+            else:
+                if content.strip():
+                    html_parts.append(f"<p>{content}</p>")
+
+    html_parts.append("</body></html>")
+
+    html_content = "\n".join(html_parts)
+    filename = f"{Path(doc['original_filename']).stem}_解析结果.html"
+
+    return Response(
+        content=html_content,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename.encode('utf-8').decode('latin-1')}"}
+    )
+
+
+@router.get("/pages/{page_id}/export/html")
+async def export_page_html(page_id: int):
+    page = await db.get_page(page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    doc = await db.get_document(page["document_id"])
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    elements = await db.get_elements(page_id)
+
+    html_parts = [
+        "<!DOCTYPE html>",
+        "<html lang='zh-CN'>",
+        "<head>",
+        "<meta charset='UTF-8'>",
+        f"<title>{doc['original_filename']} - 第 {page['page_number']} 页</title>",
+        "<style>",
+        "body { font-family: 'Microsoft YaHei', Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; line-height: 1.6; }",
+        "h1 { color: #333; border-bottom: 3px solid #007bff; padding-bottom: 10px; }",
+        "h2 { color: #555; margin-top: 20px; }",
+        "h3 { color: #666; }",
+        "table { border-collapse: collapse; width: 100%; margin: 10px 0; }",
+        "table, th, td { border: 1px solid #ddd; }",
+        "th, td { padding: 8px 12px; text-align: left; }",
+        "th { background-color: #f5f5f5; }",
+        "img { max-width: 100%; height: auto; margin: 10px 0; }",
+        "code { background-color: #f5f5f5; padding: 2px 6px; border-radius: 4px; font-family: Consolas, monospace; }",
+        ".page-header, .page-footer { color: #888; font-size: 0.9em; font-style: italic; }",
+        ".formula { text-align: center; font-size: 1.1em; margin: 15px 0; }",
+        ".caption { font-style: italic; color: #666; text-align: center; }",
+        "</style>",
+        "</head>",
+        "<body>",
+        f"<h1>第 {page['page_number']} 页</h1>",
+    ]
+
+    sorted_elements = sorted(elements, key=lambda e: e["reading_order"])
+
+    for elem in sorted_elements:
+        etype = elem["element_type"]
+        content = elem.get("content", "") or ""
+        content_format = elem.get("content_format", "") or ""
+
+        if etype == "Title":
+            html_parts.append(f"<h1 style='color: #dc143c;'>{content}</h1>")
+        elif etype == "Section-header":
+            html_parts.append(f"<h2>{content}</h2>")
+        elif etype == "Page-header":
+            html_parts.append(f"<div class='page-header'>{content}</div>")
+        elif etype == "Page-footer":
+            html_parts.append(f"<div class='page-footer'>{content}</div>")
+        elif etype == "Formula":
+            html_parts.append(f"<div class='formula'>{content}</div>")
+        elif etype == "Table":
+            if content_format == "html":
+                html_parts.append(content)
+            else:
+                html_parts.append(f"<pre>{content}</pre>")
+        elif etype == "Picture":
+            if content:
+                html_parts.append(f'<img src="file://{content}" alt="Picture">')
+        elif etype == "Caption":
+            html_parts.append(f"<div class='caption'>{content}</div>")
+        elif etype == "List-item":
+            html_parts.append(f"<li>{content}</li>")
+        elif etype in TEXT_TYPES:
+            if content.strip():
+                html_parts.append(f"<p>{content}</p>")
+        else:
+            if content.strip():
+                html_parts.append(f"<p>{content}</p>")
+
+    html_parts.append("</body></html>")
+
+    html_content = "\n".join(html_parts)
+    filename = f"{Path(doc['original_filename']).stem}_第{page['page_number']}页.html"
+
+    return Response(
+        content=html_content,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename.encode('utf-8').decode('latin-1')}"}
+    )
+
+
+@router.get("/pages/{page_id}/export/markdown")
+async def export_page_markdown(page_id: int):
+    page = await db.get_page(page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    doc = await db.get_document(page["document_id"])
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    elements = await db.get_elements(page_id)
+    sorted_elements = sorted(elements, key=lambda e: e["reading_order"])
+
+    md_parts = [f"# 第 {page['page_number']} 页\n"]
+
+    for elem in sorted_elements:
+        etype = elem["element_type"]
+        content = elem.get("content", "") or ""
+        content_format = elem.get("content_format", "") or ""
+
+        if etype == "Title":
+            md_parts.append(f"# {content}\n")
+        elif etype == "Section-header":
+            md_parts.append(f"## {content}\n")
+        elif etype == "Formula":
+            md_parts.append(f"\n{content}\n")
+        elif etype == "Table":
+            md_parts.append(f"\n{content}\n")
+        elif etype == "Picture":
+            if content:
+                md_parts.append(f"\n![Picture]({content})\n")
+        elif etype == "Caption":
+            md_parts.append(f"*{content}*\n")
+        elif etype in TEXT_TYPES:
+            if content.strip():
+                md_parts.append(f"{content}\n")
+        else:
+            if content.strip():
+                md_parts.append(f"{content}\n")
+
+    md_content = "\n".join(md_parts)
+    filename = f"{Path(doc['original_filename']).stem}_第{page['page_number']}页.md"
+
+    return Response(
+        content=md_content,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename.encode('utf-8').decode('latin-1')}"}
+    )
 
 
 

@@ -1,8 +1,10 @@
 import os
 import logging
+import io
 from pathlib import Path
 from huggingface_hub import hf_hub_download
 from ultralytics import YOLO
+from PIL import Image, ImageDraw, ImageFont
 from backend.config import MODELS_DIR, YOLO_MODEL_REPO, YOLO_MODEL_FILE, YOLO_IMG_SIZE
 
 logger = logging.getLogger(__name__)
@@ -266,3 +268,62 @@ def detect_layout_batch(image_paths: list[str]) -> list[list[dict]]:
         all_elements.append(elements)
 
     return all_elements
+
+
+TYPE_COLORS = {
+    "Caption": (255, 165, 0),
+    "Footnote": (128, 128, 128),
+    "Formula": (138, 43, 226),
+    "List-item": (0, 128, 0),
+    "Page-footer": (255, 0, 255),
+    "Page-header": (255, 0, 255),
+    "Picture": (255, 215, 0),
+    "Section-header": (0, 0, 255),
+    "Table": (255, 69, 0),
+    "Text": (0, 191, 255),
+    "Title": (220, 20, 60),
+}
+
+
+def generate_layout_annotation_image(image_path: str, raw_data: list[dict]) -> bytes:
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Image not found: {image_path}")
+
+    image = Image.open(image_path).convert("RGB")
+    draw = ImageDraw.Draw(image)
+
+    try:
+        font = ImageFont.truetype("arial.ttf", 14)
+    except:
+        try:
+            font = ImageFont.truetype("simsun.ttc", 14)
+        except:
+            font = ImageFont.load_default()
+
+    for idx, det in enumerate(raw_data):
+        bbox = det["bbox"]
+        element_type = det["element_type"]
+        confidence = det["confidence"]
+        color = TYPE_COLORS.get(element_type, (0, 255, 0))
+
+        x0, y0, x1, y1 = bbox
+        x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
+
+        draw.rectangle([x0, y0, x1, y1], outline=color, width=3)
+
+        label = f"#{idx} {element_type} {confidence:.2f}"
+        bbox_text = draw.textbbox((0, 0), label, font=font)
+        text_width = bbox_text[2] - bbox_text[0]
+        text_height = bbox_text[3] - bbox_text[1]
+
+        bg_x0 = x0
+        bg_y0 = max(0, y0 - text_height - 4)
+        bg_x1 = x0 + text_width + 8
+        bg_y1 = y0
+
+        draw.rectangle([bg_x0, bg_y0, bg_x1, bg_y1], fill=color)
+        draw.text((x0 + 4, bg_y0 + 2), label, fill=(255, 255, 255), font=font)
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()

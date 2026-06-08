@@ -9,6 +9,56 @@ logger = logging.getLogger(__name__)
 
 _model = None
 
+
+def _compute_iou(box_a: tuple, box_b: tuple) -> float:
+    x1 = max(box_a[0], box_b[0])
+    y1 = max(box_a[1], box_b[1])
+    x2 = min(box_a[2], box_b[2])
+    y2 = min(box_a[3], box_b[3])
+
+    inter = max(0, x2 - x1) * max(0, y2 - y1)
+    if inter == 0:
+        return 0.0
+
+    area_a = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
+    area_b = (box_b[2] - box_b[0]) * (box_b[3] - box_b[1])
+    union = area_a + area_b - inter
+
+    return inter / union if union > 0 else 0.0
+
+
+def remove_overlapping_elements(elements: list[dict], iou_threshold: float = 0.5) -> list[dict]:
+    if len(elements) <= 1:
+        return elements
+
+    non_text_types = {t for t in YOLO_CATEGORY_MAP.values() if t != "Text"}
+
+    def should_keep(elem, other):
+        iou = _compute_iou(elem["bbox"], other["bbox"])
+        if iou < iou_threshold:
+            return True
+
+        if elem["element_type"] == "Text" and other["element_type"] != "Text":
+            return False
+        elif elem["element_type"] != "Text" and other["element_type"] == "Text":
+            return True
+        else:
+            return elem["confidence"] >= other["confidence"]
+
+    kept = []
+    for i, elem in enumerate(elements):
+        keep = True
+        for j, other in enumerate(elements):
+            if i == j:
+                continue
+            if not should_keep(elem, other):
+                keep = False
+                break
+        if keep:
+            kept.append(elem)
+
+    return kept
+
 YOLO_CATEGORY_MAP = {
     0: "Caption",
     1: "Footnote",
@@ -74,6 +124,7 @@ def detect_layout(image_path: str) -> list[dict]:
             "reading_order": -1,
         })
 
+    elements = remove_overlapping_elements(elements)
     return elements
 
 
@@ -101,6 +152,7 @@ def detect_layout_batch(image_paths: list[str]) -> list[list[dict]]:
                     "confidence": conf,
                     "reading_order": -1,
                 })
+        elements = remove_overlapping_elements(elements)
         all_elements.append(elements)
 
     return all_elements

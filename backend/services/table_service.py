@@ -137,6 +137,10 @@ def _table_to_html(table) -> str:
     html_parts = ["<table border='1' cellpadding='4' cellspacing='0'>"]
 
     # ── 步骤3: 遍历单元格生成 HTML ─────────────────────────────────
+    # 使用指针跟踪 cells_bbox 中的当前位置，因为跨行跨列会导致每行单元格数量不同
+    cell_ptr = 0
+    total_cells = len(cells_bbox)
+
     for row_idx in range(row_count):
         html_parts.append("  <tr>")
         for col_idx in range(col_count):
@@ -144,13 +148,13 @@ def _table_to_html(table) -> str:
             if covered[row_idx][col_idx]:
                 continue
 
-            # 平铺索引：row_idx * col_count + col_idx
-            cell_flat_idx = row_idx * col_count + col_idx
-            if cell_flat_idx >= len(cells_bbox):
-                logger.warning(f"Cell index out of range: {cell_flat_idx}/{len(cells_bbox)}")
+            # 如果指针超出范围，跳过
+            if cell_ptr >= total_cells:
+                logger.warning(f"Cell pointer out of range: {cell_ptr}/{total_cells}")
                 continue
 
-            bbox = cells_bbox[cell_flat_idx]
+            bbox = cells_bbox[cell_ptr]
+            cell_ptr += 1
             x0, y0, x1, y1 = bbox
 
             # ── 计算 colspan/rowspan（参考 old-code 的 _parse_2_html_and_extract_text） ──

@@ -106,6 +106,17 @@ def _compute_iou(box_a: tuple, box_b: tuple) -> float:
     return inter / union if union > 0 else 0.0
 
 
+def _is_contained(box_a: tuple, box_b: tuple) -> bool:
+    return (box_a[0] >= box_b[0] and
+            box_a[1] >= box_b[1] and
+            box_a[2] <= box_b[2] and
+            box_a[3] <= box_b[3])
+
+
+def _bbox_area(box: tuple) -> float:
+    return (box[2] - box[0]) * (box[3] - box[1])
+
+
 def remove_overlapping_elements(elements: list[dict], iou_threshold: float = 0.5) -> list[dict]:
     if len(elements) <= 1:
         return elements
@@ -114,6 +125,36 @@ def remove_overlapping_elements(elements: list[dict], iou_threshold: float = 0.5
 
     def should_keep(elem, other):
         iou = _compute_iou(elem["bbox"], other["bbox"])
+
+        elem_area = _bbox_area(elem["bbox"])
+        other_area = _bbox_area(other["bbox"])
+
+        if _is_contained(elem["bbox"], other["bbox"]):
+            if elem_area < other_area:
+                return False
+            elif elem_area > other_area:
+                return True
+            else:
+                if elem["element_type"] == "Text" and other["element_type"] != "Text":
+                    return False
+                elif elem["element_type"] != "Text" and other["element_type"] == "Text":
+                    return True
+                else:
+                    return elem["confidence"] >= other["confidence"]
+
+        if _is_contained(other["bbox"], elem["bbox"]):
+            if other_area < elem_area:
+                return True
+            elif other_area > elem_area:
+                return False
+            else:
+                if elem["element_type"] == "Text" and other["element_type"] != "Text":
+                    return False
+                elif elem["element_type"] != "Text" and other["element_type"] == "Text":
+                    return True
+                else:
+                    return elem["confidence"] >= other["confidence"]
+
         if iou < iou_threshold:
             return True
 

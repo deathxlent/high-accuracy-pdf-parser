@@ -82,11 +82,11 @@ def _table_to_html(table) -> str:
     """
     将 PyMuPDF Table 对象转换为 HTML 表格。
 
-    关键实现（参考 old-code 的思路）:
-        1. 从所有单元格的 bbox 中提取 x/y 坐标，建立网格线
-        2. 通过 _parse_span_num 计算每个单元格的 colspan/rowspan
+    关键实现:
+        1. 使用 table.rows[row].cells[col] 结构，被span覆盖的位置返回 None
+        2. 对于非 None 的单元格，检查右侧和下侧连续的 None 数量来计算 colspan/rowspan
         3. 使用 covered 标记矩阵避免重复输出被跨越的单元格
-        4. 第一行作为表头使用 <th>，其余使用 <td>
+        4. 检测表头行（通过 table.header 或第一行判断）
         5. HTML 特殊字符转义，避免注入
 
     Args:
@@ -102,45 +102,22 @@ def _table_to_html(table) -> str:
     row_count = len(cell_data)
     col_count = len(cell_data[0])
 
-    # ── 步骤1: 收集所有单元格的 bbox，建立网格线 ────────────────────
-    # table.cells 返回的是平铺的单元格列表（按行优先顺序）
-    # 每个 cell 是 (x0, y0, x1, y1) 元组
-    cells_bbox = table.cells
+    # 检测表头行：使用第一行中最小的y1作为表头分界
+    # 注意：第一行可能包含跨行单元格（y1很大），所以取最小的y1
+    # 即没有跨行的单元格的底部，作为表头行的实际结束位置
+    header_y1 = None
+    if table.header and table.header.cells and table.rows:
+        first_row = table.rows[0]
+        valid_cells = [c for c in first_row.cells if c is not None]
+        if valid_cells:
+            header_y1 = min(c[3] for c in valid_cells)
 
-    # 提取所有 x 和 y 坐标，去重并排序，得到网格线
-    x_coords = []
-    y_coords = []
-    for bbox in cells_bbox:
-        x0, y0, x1, y1 = bbox
-        x_coords.extend([x0, x1])
-        y_coords.extend([y0, y1])
-
-    # 去重并排序（合并相近的坐标，容差 1 像素）
-    def _dedup_and_sort(coords: list[float], tol: float = 1.0) -> list[float]:
-        if not coords:
-            return []
-        coords = sorted(set(round(c, 2) for c in coords))
-        result = [coords[0]]
-        for c in coords[1:]:
-            if c - result[-1] > tol:
-                result.append(c)
-        return result
-
-    indexes_x = _dedup_and_sort(x_coords)  # 垂直线（列分隔线）
-    indexes_y = _dedup_and_sort(y_coords)  # 水平线（行分隔线）
-
-    logger.debug(f"Grid lines: {len(indexes_x)} vertical, {len(indexes_y)} horizontal")
-
-    # ── 步骤2: 构建覆盖标记矩阵 ────────────────────────────────────
+    # ── 步骤1: 构建覆盖标记矩阵 ────────────────────────────────────
     covered = [[False for _ in range(col_count)] for _ in range(row_count)]
 
     html_parts = ["<table border='1' cellpadding='4' cellspacing='0'>"]
 
-    # ── 步骤3: 遍历单元格生成 HTML ─────────────────────────────────
-    # 使用指针跟踪 cells_bbox 中的当前位置，因为跨行跨列会导致每行单元格数量不同
-    cell_ptr = 0
-    total_cells = len(cells_bbox)
-
+    # ── 步骤2: 遍历行列生成 HTML ──────────────────────────────────
     for row_idx in range(row_count):
         html_parts.append("  <tr>")
         for col_idx in range(col_count):
@@ -148,18 +125,33 @@ def _table_to_html(table) -> str:
             if covered[row_idx][col_idx]:
                 continue
 
-            # 如果指针超出范围，跳过
-            if cell_ptr >= total_cells:
-                logger.warning(f"Cell pointer out of range: {cell_ptr}/{total_cells}")
+            # 获取当前单元格的 bbox（使用 table.rows[row].cells[col]）
+            row_obj = table.rows[row_idx]
+            cell_bbox = row_obj.cells[col_idx] if col_idx < len(row_obj.cells) else None
+
+            if cell_bbox is None:
+                # 理论上不应该到这里，因为 covered 应该已经标记了
+                covered[row_idx][col_idx] = True
                 continue
 
-            bbox = cells_bbox[cell_ptr]
-            cell_ptr += 1
-            x0, y0, x1, y1 = bbox
+            x0, y0, x1, y1 = cell_bbox
 
-            # ── 计算 colspan/rowspan（参考 old-code 的 _parse_2_html_and_extract_text） ──
-            colspan = _parse_span_num(x0, x1, indexes_x)
-            rowspan = _parse_span_num(y0, y1, indexes_y)
+            # ── 计算 colspan: 检查右侧连续的 None ──
+            colspan = 1
+            for c in range(col_idx + 1, col_count):
+                if row_obj.cells[c] is None:
+                    colspan += 1
+                else:
+                    break
+
+            # ── 计算 rowspan: 检查下侧连续的 None ──
+            rowspan = 1
+            for r in range(row_idx + 1, row_count):
+                next_row = table.rows[r]
+                if col_idx < len(next_row.cells) and next_row.cells[col_idx] is None:
+                    rowspan += 1
+                else:
+                    break
 
             # 边界检查
             if row_idx + rowspan > row_count:
@@ -178,8 +170,14 @@ def _table_to_html(table) -> str:
             # 获取单元格文本
             cell_value = cell_data[row_idx][col_idx] or ""
 
-            # 标签选择
-            tag = "th" if row_idx == 0 else "td"
+            # 判断是否为表头：y1 <= header_y1 或是第一行且header_y1为None
+            is_header = False
+            if header_y1 is not None:
+                is_header = (y1 <= header_y1 + 1)  # 允许1像素容差
+            else:
+                is_header = (row_idx == 0)
+
+            tag = "th" if is_header else "td"
 
             # 构建 span 属性
             span_attrs = ""

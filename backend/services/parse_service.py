@@ -200,6 +200,7 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
     
     current_page_last_table_info = None
     current_cross_page_group = None
+    last_table_result_idx = None
 
     await db.update_page(page_id, status="parsing_content")
 
@@ -299,23 +300,14 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
             elif elem_type == "Table":
                 force_no_header = False
                 elem_cross_page_group = None
+                need_retroactive_update = False
                 if prev_page_table_info is not None:
-                    try:
-                        from backend.services.table_service import _find_valid_table
-
-                        pdf_bbox = jpg_bbox_to_pdf_bbox(bbox, DEFAULT_DPI)
-                        rect = fitz.Rect(pdf_bbox)
-                        preview_table, preview_data, _ = _find_valid_table(pdf_page, rect)
-                        
-                        if preview_table and preview_data:
-                            is_cont = _is_continuation_table(
-                                preview_table.col_count,
-                                preview_data[0],
-                                prev_page_table_info["col_count"],
-                                prev_page_table_info["last_row"]
-                            )
-                            if is_cont:
-                                logger.info(f"Page {page_info['page_number']}: 检测到跨页接续表格，强制不识别表头")
+                    if force_ocr and elem_idx in table_results:
+                        scanned_result = table_results[elem_idx]
+                        scanned_cols = scanned_result.get("cols", 0)
+                        if scanned_cols > 0 and prev_page_table_info.get("col_count", 0) > 0:
+                            if scanned_cols == prev_page_table_info["col_count"]:
+                                logger.info(f"Page {page_info['page_number']}: 扫描版检测到跨页接续表格(列数匹配 cols={scanned_cols})，强制不识别表头")
                                 force_no_header = True
                                 if prev_page_table_info.get("cross_page_group") is not None:
                                     elem_cross_page_group = prev_page_table_info["cross_page_group"]
@@ -324,8 +316,35 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
                                     cross_page_group_counter += 1
                                     elem_cross_page_group = cross_page_group_counter
                                     current_cross_page_group = cross_page_group_counter
-                    except Exception as e:
-                        logger.debug(f"跨页表格检测失败: {e}")
+                                    need_retroactive_update = True
+                    else:
+                        try:
+                            from backend.services.table_service import _find_valid_table
+
+                            pdf_bbox = jpg_bbox_to_pdf_bbox(bbox, DEFAULT_DPI)
+                            rect = fitz.Rect(pdf_bbox)
+                            preview_table, preview_data, _ = _find_valid_table(pdf_page, rect)
+                            
+                            if preview_table and preview_data:
+                                is_cont = _is_continuation_table(
+                                    preview_table.col_count,
+                                    preview_data[0],
+                                    prev_page_table_info["col_count"],
+                                    prev_page_table_info["last_row"]
+                                )
+                                if is_cont:
+                                    logger.info(f"Page {page_info['page_number']}: 检测到跨页接续表格，强制不识别表头")
+                                    force_no_header = True
+                                    if prev_page_table_info.get("cross_page_group") is not None:
+                                        elem_cross_page_group = prev_page_table_info["cross_page_group"]
+                                        current_cross_page_group = elem_cross_page_group
+                                    else:
+                                        cross_page_group_counter += 1
+                                        elem_cross_page_group = cross_page_group_counter
+                                        current_cross_page_group = cross_page_group_counter
+                                        need_retroactive_update = True
+                        except Exception as e:
+                            logger.debug(f"跨页表格检测失败: {e}")
                 
                 if elem_idx in table_results:
                     result = table_results[elem_idx]
@@ -337,27 +356,42 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
                 content = result.get("html", "") or result.get("markdown", "")
                 content_format = "html" if result.get("html") else "markdown"
                 
-                # 记录当前表格信息用于下一页跨页检测
-                # 记录列数最多的表格（而不是最后一个），用于更准确的跨页接续检测
-                try:
-                    # 获取表格数据
-                    from backend.services.table_service import _find_valid_table
-                    
-                    pdf_bbox = jpg_bbox_to_pdf_bbox(bbox, DEFAULT_DPI)
-                    rect = fitz.Rect(pdf_bbox)
-                    info_table, info_data, _ = _find_valid_table(pdf_page, rect)
-                    
-                    if info_table and info_data:
+                if force_ocr and elem_idx in table_results:
+                    scanned_res = table_results[elem_idx]
+                    scanned_cols = scanned_res.get("cols", 0)
+                    if scanned_cols > 0:
                         if (current_page_last_table_info is None or 
-                            info_table.col_count > current_page_last_table_info["col_count"]):
+                            scanned_cols > current_page_last_table_info["col_count"]):
+                            html_content = scanned_res.get("html", "") or scanned_res.get("markdown", "")
+                            lines = [l.strip() for l in html_content.split("\n") if l.strip()]
+                            last_row = lines[-1] if lines else ""
                             current_page_last_table_info = {
-                                "col_count": info_table.col_count,
-                                "last_row": info_data[-1],
+                                "col_count": scanned_cols,
+                                "last_row": last_row,
                                 "page_number": page_info["page_number"],
                                 "cross_page_group": current_cross_page_group,
                             }
-                except Exception as e:
-                    logger.debug(f"记录表格信息失败: {e}")
+                            last_table_result_idx = len(parsed_results)
+                else:
+                    try:
+                        from backend.services.table_service import _find_valid_table
+                        
+                        pdf_bbox = jpg_bbox_to_pdf_bbox(bbox, DEFAULT_DPI)
+                        rect = fitz.Rect(pdf_bbox)
+                        info_table, info_data, _ = _find_valid_table(pdf_page, rect)
+                        
+                        if info_table and info_data:
+                            if (current_page_last_table_info is None or 
+                                info_table.col_count > current_page_last_table_info["col_count"]):
+                                current_page_last_table_info = {
+                                    "col_count": info_table.col_count,
+                                    "last_row": info_data[-1],
+                                    "page_number": page_info["page_number"],
+                                    "cross_page_group": current_cross_page_group,
+                                }
+                                last_table_result_idx = len(parsed_results)
+                    except Exception as e:
+                        logger.debug(f"记录表格信息失败: {e}")
 
             parsed_results.append({
                 "elem_type": elem_type,
@@ -367,6 +401,7 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
                 "content": content,
                 "content_format": content_format,
                 "cross_page_group": elem_cross_page_group if elem_type == "Table" else None,
+                "need_retroactive_update": need_retroactive_update if elem_type == "Table" else False,
             })
             element_contents[elem_idx] = content
 
@@ -389,18 +424,26 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
     for idx, result in enumerate(parsed_results):
         result_key = (result["bbox"], result["elem_type"])
         if result_key in kept_bboxes:
-            await db.create_element(
+            element_id = await db.create_element(
                 page_id, result["elem_type"], result["bbox"], 
                 result["confidence"], result["reading_order"],
                 content=result["content"], content_format=result["content_format"],
                 cross_page_group=result.get("cross_page_group"),
             )
+            if idx == last_table_result_idx:
+                current_page_last_table_info["element_id"] = element_id
+            if (result.get("need_retroactive_update") and 
+                prev_page_table_info and prev_page_table_info.get("element_id")):
+                await db.update_element_cross_page_group(
+                    prev_page_table_info["element_id"], result["cross_page_group"]
+                )
+                prev_page_table_info["cross_page_group"] = result["cross_page_group"]
 
     pdf_doc.close()
     await db.update_page(page_id, status="completed")
     logger.info(f"Page {page_info['page_number']}: parsing completed")
     
-    return current_page_last_table_info
+    return current_page_last_table_info, cross_page_group_counter
 
 
 async def get_parse_results(doc_id: int) -> dict:
@@ -436,6 +479,7 @@ async def get_parse_results(doc_id: int) -> dict:
                 "reading_order": elem["reading_order"],
                 "content": elem["content"],
                 "content_format": elem["content_format"],
+                "cross_page_group": elem.get("cross_page_group"),
             })
 
         result_pages.append(page_data)

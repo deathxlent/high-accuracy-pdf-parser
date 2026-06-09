@@ -209,6 +209,15 @@ async def delete_document(doc_id: int):
         await db.commit()
 
 
+async def update_element_cross_page_group(element_id: int, cross_page_group: int):
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        await db.execute(
+            "UPDATE page_elements SET cross_page_group = ? WHERE id = ?",
+            (cross_page_group, element_id),
+        )
+        await db.commit()
+
+
 async def execute_query(sql: str, params: tuple = ()):
     async with aiosqlite.connect(str(DB_PATH)) as db:
         await db.execute(sql, params)

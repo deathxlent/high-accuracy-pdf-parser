@@ -7,6 +7,8 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, Response, HTMLResponse
 from backend.config import TMP_DIR, DB_PATH
 from backend import database as db
+import re
+
 from backend.services.parse_service import process_upload, process_document, get_parse_results, get_parse_progress, TEXT_TYPES
 from backend.services.layout_service import get_raw_layout_data, generate_layout_annotation_image
 
@@ -324,6 +326,54 @@ async def get_page_layout_annotation(page_id: int):
         raise HTTPException(status_code=500, detail=f"Failed to generate annotation image: {str(e)}")
 
 
+def _extract_table_rows(html: str) -> list[str]:
+    if not html:
+        return []
+    tr_pattern = re.compile(r'<tr[^>]*>.*?</tr>', re.DOTALL | re.IGNORECASE)
+    return tr_pattern.findall(html)
+
+
+def _build_merged_table(first_html: str, continuation_htmls: list[str]) -> str:
+    rows = _extract_table_rows(first_html)
+    for cont_html in continuation_htmls:
+        cont_rows = _extract_table_rows(cont_html)
+        if cont_rows:
+            rows.extend(cont_rows)
+
+    if not rows:
+        return first_html
+
+    return "<table border='1' cellpadding='4' cellspacing='0'>\n" + "\n".join(rows) + "\n</table>"
+
+
+def _merge_cross_page_tables(pages: list[dict]) -> list[dict]:
+    group_tables = {}
+    for page in pages:
+        for elem in page["elements"]:
+            cpg = elem.get("cross_page_group")
+            if cpg is not None and elem["element_type"] == "Table":
+                if cpg not in group_tables:
+                    group_tables[cpg] = []
+                group_tables[cpg].append(elem)
+
+    merged_groups = set()
+    for group_id, tables in group_tables.items():
+        if len(tables) <= 1:
+            continue
+        first = tables[0]
+        rest = tables[1:]
+        first_html = first.get("content", "") or ""
+        rest_htmls = [(t.get("content", "") or "") for t in rest]
+        merged_html = _build_merged_table(first_html, rest_htmls)
+        first["content"] = merged_html
+        merged_groups.add(group_id)
+
+    for page in pages:
+        page["_skip_groups"] = merged_groups
+
+    return pages
+
+
 @router.get("/documents/{doc_id}/export/html")
 async def export_document_html(doc_id: int):
     result = await get_parse_results(doc_id)
@@ -332,6 +382,15 @@ async def export_document_html(doc_id: int):
 
     pages = result["pages"]
     doc = result["document"]
+
+    pages = _merge_cross_page_tables(pages)
+
+    first_elem_per_group = {}
+    for page in pages:
+        for elem in sorted(page["elements"], key=lambda e: e["reading_order"]):
+            cpg = elem.get("cross_page_group")
+            if cpg is not None and elem["element_type"] == "Table" and cpg not in first_elem_per_group:
+                first_elem_per_group[cpg] = elem["id"]
 
     html_parts = [
         "<!DOCTYPE html>",
@@ -364,11 +423,17 @@ async def export_document_html(doc_id: int):
         html_parts.append(f"<h1>第 {page_num} 页</h1>")
 
         elements = sorted(page["elements"], key=lambda e: e["reading_order"])
+        skip_groups = page.get("_skip_groups", set())
 
         for elem in elements:
             etype = elem["element_type"]
             content = elem.get("content", "") or ""
             content_format = elem.get("content_format", "") or ""
+            cpg = elem.get("cross_page_group")
+
+            if etype == "Table" and cpg in skip_groups and cpg is not None:
+                if first_elem_per_group.get(cpg) != elem["id"]:
+                    continue
 
             if etype == "Title":
                 html_parts.append(f"<h1 style='color: #dc143c;'>{content}</h1>")

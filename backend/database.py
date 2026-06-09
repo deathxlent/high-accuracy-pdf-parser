@@ -73,6 +73,11 @@ async def init_db():
             await db.execute("ALTER TABLE pdf_pages ADD COLUMN jpg_height REAL NOT NULL DEFAULT 0")
         except aiosqlite.OperationalError:
             pass
+
+        try:
+            await db.execute("ALTER TABLE page_elements ADD COLUMN cross_page_group INTEGER")
+        except aiosqlite.OperationalError:
+            pass
         
         await db.commit()
 
@@ -160,15 +165,15 @@ async def get_page(page_id: int) -> dict | None:
 
 async def create_element(page_id: int, element_type: str, bbox: tuple[float, float, float, float],
                          confidence: float, reading_order: int, content: str = None,
-                         content_format: str = "markdown") -> int:
+                         content_format: str = "markdown", cross_page_group: int = None) -> int:
     async with aiosqlite.connect(str(DB_PATH)) as db:
         cursor = await db.execute(
             """INSERT INTO page_elements
                (page_id, element_type, bbox_x0, bbox_y0, bbox_x1, bbox_y1,
-                confidence, reading_order, content, content_format, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                confidence, reading_order, content, content_format, cross_page_group, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (page_id, element_type, bbox[0], bbox[1], bbox[2], bbox[3],
-             confidence, reading_order, content, content_format, _now()),
+             confidence, reading_order, content, content_format, cross_page_group, _now()),
         )
         await db.commit()
         return cursor.lastrowid

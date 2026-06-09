@@ -1,12 +1,44 @@
 import logging
 import os
 import tempfile
+from pathlib import Path
 from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 _ocr_engine = None
 _formula_engine = None
+
+_PADDLEOCR_MODEL_DIR = "C:/paddleocr_models"
+
+
+def _ensure_models_ready():
+    os.makedirs(_PADDLEOCR_MODEL_DIR, exist_ok=True)
+    det_dir = os.path.join(_PADDLEOCR_MODEL_DIR, "det")
+    rec_dir = os.path.join(_PADDLEOCR_MODEL_DIR, "rec")
+    cls_dir = os.path.join(_PADDLEOCR_MODEL_DIR, "cls")
+
+    if (os.path.exists(os.path.join(det_dir, "inference.pdmodel"))
+            and os.path.exists(os.path.join(rec_dir, "inference.pdmodel"))):
+        return det_dir, rec_dir, cls_dir
+
+    import shutil
+    home = Path.home()
+    src_dirs = {
+        "det": home / ".paddleocr" / "whl" / "det" / "ch" / "ch_PP-OCRv4_det_infer",
+        "rec": home / ".paddleocr" / "whl" / "rec" / "ch" / "ch_PP-OCRv4_rec_infer",
+        "cls": home / ".paddleocr" / "whl" / "cls" / "ch_ppocr_mobile_v2.0_cls_infer",
+    }
+
+    for name, src in src_dirs.items():
+        dst = os.path.join(_PADDLEOCR_MODEL_DIR, name)
+        os.makedirs(dst, exist_ok=True)
+        if src.exists():
+            for f in src.iterdir():
+                if f.is_file():
+                    shutil.copy2(str(f), os.path.join(dst, f.name))
+
+    return det_dir, rec_dir, cls_dir
 
 
 def _get_ocr_engine():
@@ -17,10 +49,13 @@ def _get_ocr_engine():
     try:
         from paddleocr import PaddleOCR
         logger.info("Initializing PaddleOCR engine...")
+        det_dir, rec_dir, cls_dir = _ensure_models_ready()
         _ocr_engine = PaddleOCR(
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
+            det_model_dir=det_dir,
+            rec_model_dir=rec_dir,
+            cls_model_dir=cls_dir,
+            use_angle_cls=False,
+            lang="ch",
             show_log=False,
         )
         logger.info("PaddleOCR engine loaded successfully")
@@ -39,10 +74,13 @@ def _get_formula_engine():
     try:
         from paddleocr import PaddleOCR
         logger.info("Initializing PaddleOCR formula engine...")
+        det_dir, rec_dir, cls_dir = _ensure_models_ready()
         _formula_engine = PaddleOCR(
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
+            det_model_dir=det_dir,
+            rec_model_dir=rec_dir,
+            cls_model_dir=cls_dir,
+            use_angle_cls=False,
+            lang="ch",
             show_log=False,
         )
         logger.info("PaddleOCR formula engine loaded successfully")

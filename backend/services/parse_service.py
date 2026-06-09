@@ -123,12 +123,15 @@ async def process_document(doc_id: int):
 
         # 用于跨页表格检测：记录前一页最后一个表格的特征
         prev_page_table_info = None
+        cross_page_group_counter = 0
         
         for i, page in enumerate(pages):
             try:
                 set_parse_progress(doc_id, "parsing_content", 55 + (i / total_pages) * 40, 
                                   f"解析页面 {page['page_number']}/{total_pages}")
-                current_page_table_info = await _parse_page(doc_id, page, doc_dir, prev_page_table_info)
+                current_page_table_info, cross_page_group_counter = await _parse_page(
+                    doc_id, page, doc_dir, prev_page_table_info, cross_page_group_counter
+                )
                 prev_page_table_info = current_page_table_info
             except Exception as e:
                 logger.error(f"Failed to parse page {page['page_number']}: {e}")
@@ -184,18 +187,19 @@ def _is_continuation_table(curr_table_cols: int, curr_first_row: list,
     return False
 
 
-async def _parse_page(doc_id: int, page_info: dict, doc_dir: str, prev_page_table_info: dict = None):
+async def _parse_page(doc_id: int, page_info: dict, doc_dir: str, 
+                      prev_page_table_info: dict = None,
+                      cross_page_group_counter: int = 0):
     page_id = page_info["id"]
     jpg_path = page_info["jpg_path"]
     single_pdf_path = page_info["single_pdf_path"]
     is_scanned = page_info["is_scanned"]
     elements = page_info.get("_elements", [])
     
-    # 提前导入需要的模块，避免条件分支内导入导致的变量未定义问题
     from backend.services.pdf_service import jpg_bbox_to_pdf_bbox, DEFAULT_DPI
     
-    # 记录当前页最后一个表格的信息，用于下一页跨页检测
     current_page_last_table_info = None
+    current_cross_page_group = None
 
     await db.update_page(page_id, status="parsing_content")
 
@@ -293,14 +297,12 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str, prev_page_tabl
                 content_format = "image_path"
 
             elif elem_type == "Table":
-                # 检测是否是跨页接续的表格
                 force_no_header = False
+                elem_cross_page_group = None
                 if prev_page_table_info is not None:
-                    # 先用PyMuPDF检测表格结构（不提取内容，只检测列数和第一行
                     try:
                         from backend.services.table_service import _find_valid_table
 
-                        # 转换坐标
                         pdf_bbox = jpg_bbox_to_pdf_bbox(bbox, DEFAULT_DPI)
                         rect = fitz.Rect(pdf_bbox)
                         preview_table, preview_data, _ = _find_valid_table(pdf_page, rect)
@@ -315,6 +317,13 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str, prev_page_tabl
                             if is_cont:
                                 logger.info(f"Page {page_info['page_number']}: 检测到跨页接续表格，强制不识别表头")
                                 force_no_header = True
+                                if prev_page_table_info.get("cross_page_group") is not None:
+                                    elem_cross_page_group = prev_page_table_info["cross_page_group"]
+                                    current_cross_page_group = elem_cross_page_group
+                                else:
+                                    cross_page_group_counter += 1
+                                    elem_cross_page_group = cross_page_group_counter
+                                    current_cross_page_group = cross_page_group_counter
                     except Exception as e:
                         logger.debug(f"跨页表格检测失败: {e}")
                 
@@ -339,13 +348,13 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str, prev_page_tabl
                     info_table, info_data, _ = _find_valid_table(pdf_page, rect)
                     
                     if info_table and info_data:
-                        # 如果当前还没有记录，或者当前表格列数更多，则更新记录
                         if (current_page_last_table_info is None or 
                             info_table.col_count > current_page_last_table_info["col_count"]):
                             current_page_last_table_info = {
                                 "col_count": info_table.col_count,
                                 "last_row": info_data[-1],
                                 "page_number": page_info["page_number"],
+                                "cross_page_group": current_cross_page_group,
                             }
                 except Exception as e:
                     logger.debug(f"记录表格信息失败: {e}")
@@ -357,6 +366,7 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str, prev_page_tabl
                 "reading_order": reading_order,
                 "content": content,
                 "content_format": content_format,
+                "cross_page_group": elem_cross_page_group if elem_type == "Table" else None,
             })
             element_contents[elem_idx] = content
 
@@ -382,7 +392,8 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str, prev_page_tabl
             await db.create_element(
                 page_id, result["elem_type"], result["bbox"], 
                 result["confidence"], result["reading_order"],
-                content=result["content"], content_format=result["content_format"]
+                content=result["content"], content_format=result["content_format"],
+                cross_page_group=result.get("cross_page_group"),
             )
 
     pdf_doc.close()

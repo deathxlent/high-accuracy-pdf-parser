@@ -267,6 +267,7 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
 
     parsed_results = []
     element_contents = {}
+    has_body_content_before_table = False
 
     for elem_idx, elem in enumerate(elements):
         elem_type = elem["element_type"]
@@ -275,6 +276,9 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
         reading_order = elem["reading_order"]
         content = ""
         content_format = "markdown"
+
+        if elem_type in ("Text", "Section-header", "List-item"):
+            has_body_content_before_table = True
 
         try:
             if elem_type in TEXT_TYPES:
@@ -316,7 +320,8 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
                             empty_cells = re.findall(r'<t[dh]>\s*</t[dh]>', first_row, re.IGNORECASE)
                             first_row_has_empty_cell = len(empty_cells) > 0
                         if (scanned_cols > 0 and prev_page_table_info.get("col_count", 0) > 0 
-                            and is_at_page_top and prev_at_page_bottom):
+                            and is_at_page_top and prev_at_page_bottom
+                            and not has_body_content_before_table):
                             if abs(scanned_cols - prev_page_table_info["col_count"]) <= 1:
                                 logger.info(f"Page {page_info['page_number']}: 扫描版检测到跨页接续表格(列数匹配 cols={scanned_cols})，强制不识别表头")
                                 force_no_header = True

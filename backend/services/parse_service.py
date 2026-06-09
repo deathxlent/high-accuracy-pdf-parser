@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import re
 import fitz
 from pathlib import Path
 from backend import database as db
@@ -302,11 +303,21 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
                 elem_cross_page_group = None
                 need_retroactive_update = False
                 if prev_page_table_info is not None:
+                    prev_at_page_bottom = prev_page_table_info.get("at_page_bottom", True)
                     if force_ocr and elem_idx in table_results:
                         scanned_result = table_results[elem_idx]
                         scanned_cols = scanned_result.get("cols", 0)
-                        if scanned_cols > 0 and prev_page_table_info.get("col_count", 0) > 0:
-                            if scanned_cols == prev_page_table_info["col_count"]:
+                        is_at_page_top = (bbox[1] < page_info["jpg_height"] * 0.3)
+                        scanned_html = scanned_result.get("html", "") or scanned_result.get("markdown", "")
+                        first_tr_match = re.search(r'<tr[^>]*>(.*?)</tr>', scanned_html, re.DOTALL | re.IGNORECASE)
+                        first_row_has_empty_cell = False
+                        if first_tr_match:
+                            first_row = first_tr_match.group(1)
+                            empty_cells = re.findall(r'<t[dh]>\s*</t[dh]>', first_row, re.IGNORECASE)
+                            first_row_has_empty_cell = len(empty_cells) > 0
+                        if (scanned_cols > 0 and prev_page_table_info.get("col_count", 0) > 0 
+                            and is_at_page_top and prev_at_page_bottom):
+                            if abs(scanned_cols - prev_page_table_info["col_count"]) <= 1:
                                 logger.info(f"Page {page_info['page_number']}: 扫描版检测到跨页接续表格(列数匹配 cols={scanned_cols})，强制不识别表头")
                                 force_no_header = True
                                 if prev_page_table_info.get("cross_page_group") is not None:
@@ -361,15 +372,18 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
                     scanned_cols = scanned_res.get("cols", 0)
                     if scanned_cols > 0:
                         if (current_page_last_table_info is None or 
-                            scanned_cols > current_page_last_table_info["col_count"]):
+                            bbox[3] > current_page_last_table_info.get("bbox_y1", 0)):
                             html_content = scanned_res.get("html", "") or scanned_res.get("markdown", "")
                             lines = [l.strip() for l in html_content.split("\n") if l.strip()]
                             last_row = lines[-1] if lines else ""
+                            at_page_bottom = (bbox[3] > page_info["jpg_height"] * 0.7)
                             current_page_last_table_info = {
                                 "col_count": scanned_cols,
                                 "last_row": last_row,
                                 "page_number": page_info["page_number"],
                                 "cross_page_group": current_cross_page_group,
+                                "bbox_y1": bbox[3],
+                                "at_page_bottom": at_page_bottom,
                             }
                             last_table_result_idx = len(parsed_results)
                 else:
@@ -382,12 +396,14 @@ async def _parse_page(doc_id: int, page_info: dict, doc_dir: str,
                         
                         if info_table and info_data:
                             if (current_page_last_table_info is None or 
-                                info_table.col_count > current_page_last_table_info["col_count"]):
+                                bbox[3] > current_page_last_table_info.get("bbox_y1", 0)):
                                 current_page_last_table_info = {
                                     "col_count": info_table.col_count,
                                     "last_row": info_data[-1],
                                     "page_number": page_info["page_number"],
                                     "cross_page_group": current_cross_page_group,
+                                    "bbox_y1": bbox[3],
+                                    "at_page_bottom": True,
                                 }
                                 last_table_result_idx = len(parsed_results)
                     except Exception as e:

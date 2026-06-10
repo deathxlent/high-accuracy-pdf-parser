@@ -16,6 +16,16 @@ try:
 except OSError:
     pass
 
+import paddle
+paddle.device.set_device("cpu")
+
+_original_prod = paddle.Tensor.prod
+def _patched_prod(self, *args, **kwargs):
+    if self.place.is_gpu_place():
+        return _original_prod(self.cpu(), *args, **kwargs)
+    return _original_prod(self, *args, **kwargs)
+paddle.Tensor.prod = _patched_prod
+
 BASE_DIR = Path(__file__).parent.resolve()
 IMAGE_DIR = str(Path(__file__).parent.parent.resolve() / "tmp/42e59745cdb54b6fb2c635d7c11dbd43")
 OUTPUT_DIR = BASE_DIR / "output_paddleocr_vl_cpu"

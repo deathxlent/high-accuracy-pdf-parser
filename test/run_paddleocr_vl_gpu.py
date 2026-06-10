@@ -15,6 +15,15 @@ try:
 except OSError:
     pass
 
+import paddle
+
+_original_prod = paddle.Tensor.prod
+def _patched_prod(self, *args, **kwargs):
+    if self.place.is_gpu_place():
+        return _original_prod(self.cpu(), *args, **kwargs)
+    return _original_prod(self, *args, **kwargs)
+paddle.Tensor.prod = _patched_prod
+
 BASE_DIR = Path(__file__).parent.resolve()
 OUTPUT_DIR = BASE_DIR / "output_paddleocr_vl_gpu"
 IMAGE_DIR = str(Path(__file__).parent.parent.resolve() / "tmp/42e59745cdb54b6fb2c635d7c11dbd43")
@@ -60,14 +69,39 @@ def _get_cuda_info():
     return False, 0, "N/A", None
 
 
+def _get_paddle_cuda_version():
+    try:
+        import paddle
+        cuda_ver = paddle.version.cuda
+        if cuda_ver and cuda_ver != "False":
+            return cuda_ver
+    except Exception:
+        pass
+    return None
+
+
 def _is_sm_compatible(compute_capability):
     if not compute_capability:
         return True, None
     try:
         major, minor = map(int, compute_capability.split("."))
         sm_ver = major * 10 + minor
-        if sm_ver < 70:
-            return False, f"SM {compute_capability} (requires SM >= 7.0 with CUDA 12.x)"
+        
+        cuda_ver = _get_paddle_cuda_version()
+        if cuda_ver:
+            cuda_major = int(cuda_ver.split(".")[0])
+            if cuda_major >= 12:
+                min_sm = 70
+                cuda_label = "CUDA 12.x"
+            else:
+                min_sm = 35
+                cuda_label = "CUDA 11.x"
+        else:
+            min_sm = 70
+            cuda_label = "CUDA 12.x"
+        
+        if sm_ver < min_sm:
+            return False, f"SM {compute_capability} (requires SM >= {min_sm//10}.{min_sm%10} with {cuda_label})"
         return True, None
     except Exception:
         return True, None
@@ -124,8 +158,6 @@ def process_images():
     from paddleocr import PaddleOCRVL
 
     has_cuda, gpu_count, gpu_name, compute_capability = _get_cuda_info()
-    device_to_use = "gpu"
-    fallback_to_cpu = False
 
     print("\n" + "=" * 60)
     print("  PaddleOCR-VL-1.6 - Document Parsing Pipeline (GPU)")
@@ -139,7 +171,8 @@ def process_images():
         compatible, reason = _is_sm_compatible(compute_capability)
         if not compatible:
             print(f"[WARN] GPU incompatibility detected: {reason}")
-            fallback_to_cpu = True
+            print(f"       Please install CUDA 11.x compatible paddlepaddle-gpu:")
+            print(f"       pip install paddlepaddle-gpu==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/")
     print(f"[INFO] Model cache dir: {MODELS_DIR}")
     print(f"[INFO] Images to process: {len(IMAGES)}")
 
@@ -148,42 +181,27 @@ def process_images():
         print(f"       Place images named 'page_*.jpg/png' in: {BASE_DIR}")
         print("       Continuing to initialize pipeline (model download test)...")
 
-    pipeline = None
-    if not fallback_to_cpu:
-        print(f"\n[LOAD] Initializing PaddleOCRVL pipeline with GPU ...")
-        print(f"       This may take several minutes on first run...")
-        t0 = time.time()
-        try:
-            pipeline = PaddleOCRVL(
-                pipeline_version=PIPELINE_VERSION,
-                device="gpu",
-            )
-            t_load = time.time() - t0
-            print(f"[OK] Pipeline initialized (GPU) in {t_load:.1f}s")
-        except Exception as e:
-            err_msg = str(e)
-            print(f"[WARN] GPU initialization failed: {err_msg}")
-            if "SM" in err_msg or "not compiled" in err_msg or "compute" in err_msg.lower():
-                print("[WARN] This appears to be a GPU compute capability incompatibility.")
-            fallback_to_cpu = True
-
-    if fallback_to_cpu or pipeline is None:
-        print(f"\n[LOAD] Falling back to CPU mode...")
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-        device_to_use = "cpu"
-        t0 = time.time()
-        try:
-            pipeline = PaddleOCRVL(
-                pipeline_version=PIPELINE_VERSION,
-                device="cpu",
-            )
-            t_load = time.time() - t0
-            print(f"[OK] Pipeline initialized (CPU fallback) in {t_load:.1f}s")
-        except Exception as e:
-            print(f"[ERROR] Failed to initialize PaddleOCRVL even with CPU: {e}")
-            print("        Try deleting corrupted model cache and rerun.")
-            print(f"        Cache location: {MODELS_DIR}")
-            raise
+    print(f"\n[LOAD] Initializing PaddleOCRVL pipeline with GPU ...")
+    print(f"       This may take several minutes on first run...")
+    t0 = time.time()
+    try:
+        pipeline = PaddleOCRVL(
+            pipeline_version=PIPELINE_VERSION,
+            device="gpu",
+        )
+        t_load = time.time() - t0
+        print(f"[OK] Pipeline initialized (GPU) in {t_load:.1f}s")
+    except Exception as e:
+        err_msg = str(e)
+        print(f"[ERROR] GPU initialization failed: {err_msg}")
+        if "SM" in err_msg or "not compiled" in err_msg or "compute" in err_msg.lower():
+            print("[ERROR] This appears to be a GPU compute capability incompatibility.")
+            print("[ERROR] Your GPU has SM {compute_capability}, but current paddlepaddle-gpu requires SM >= 7.0.".format(
+                compute_capability=compute_capability or "unknown"))
+            print("[ERROR] Solution: Install CUDA 11.x compatible paddlepaddle-gpu:")
+            print("[ERROR]   pip uninstall -y paddlepaddle-gpu paddlepaddle")
+            print("[ERROR]   pip install paddlepaddle-gpu==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/")
+        raise
 
     if len(IMAGES) == 0:
         print("\n[INFO] Pipeline initialized successfully. No images to process.")
@@ -206,7 +224,7 @@ def process_images():
             result = {
                 "image": img_name,
                 "pipeline_version": PIPELINE_VERSION,
-                "device": f"{device_to_use}:{gpu_name}" if device_to_use == "gpu" else "cpu (fallback)",
+                "device": f"gpu:{gpu_name}",
                 "elements": [],
                 "markdown": "",
                 "error": None,
@@ -248,7 +266,7 @@ def process_images():
             all_results.append({
                 "image": img_name,
                 "pipeline_version": PIPELINE_VERSION,
-                "device": f"{device_to_use}:{gpu_name}" if device_to_use == "gpu" else "cpu (fallback)",
+                "device": f"gpu:{gpu_name}",
                 "elements": [],
                 "markdown": "",
                 "error": str(e),

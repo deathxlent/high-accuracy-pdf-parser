@@ -24,6 +24,45 @@ def _patched_prod(self, *args, **kwargs):
     return _original_prod(self, *args, **kwargs)
 paddle.Tensor.prod = _patched_prod
 
+def _patch_update_model_kwargs_for_generation():
+    from paddlex.inference.models.doc_vlm.modeling.paddleocr_vl._paddleocr_vl import (
+        PaddleOCRVLForConditionalGeneration,
+    )
+    from paddlex.inference.models.common.transformers.transformers.model_outputs import (
+        ModelOutput,
+    )
+
+    _orig_update = PaddleOCRVLForConditionalGeneration.update_model_kwargs_for_generation
+
+    def _patched_update(self, outputs, model_kwargs, is_encoder_decoder=False):
+        if (
+            isinstance(outputs, ModelOutput)
+            and "past_key_values" in outputs
+            and outputs.past_key_values is not None
+        ):
+            model_kwargs["past_key_values"] = outputs.past_key_values
+        else:
+            model_kwargs = _orig_update(self, outputs, model_kwargs, is_encoder_decoder)
+        if (
+            not is_encoder_decoder
+            and model_kwargs.get("attention_mask", None) is not None
+        ):
+            attention_mask = model_kwargs["attention_mask"]
+            model_kwargs["attention_mask"] = paddle.concat(
+                [
+                    attention_mask,
+                    paddle.ones(
+                        [attention_mask.shape[0], 1], dtype=attention_mask.dtype
+                    ),
+                ],
+                axis=-1,
+            )
+        return model_kwargs
+
+    PaddleOCRVLForConditionalGeneration.update_model_kwargs_for_generation = _patched_update
+
+_patch_update_model_kwargs_for_generation()
+
 BASE_DIR = Path(__file__).parent.resolve()
 OUTPUT_DIR = BASE_DIR / "output_paddleocr_vl_gpu"
 IMAGE_DIR = str(Path(__file__).parent.parent.resolve() / "tmp/42e59745cdb54b6fb2c635d7c11dbd43")

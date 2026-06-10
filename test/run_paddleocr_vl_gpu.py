@@ -4,6 +4,12 @@ import json
 import time
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+MODELS_DIR = PROJECT_ROOT / "models" / "paddlex_models"
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
+os.environ["PADDLE_PDX_CACHE_HOME"] = str(MODELS_DIR.parent)
+os.environ["HF_ENDPOINT"] = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
+
 try:
     import torch
 except OSError:
@@ -90,16 +96,34 @@ def process_images():
     print(f"[INFO] Pipeline version: {PIPELINE_VERSION}")
     print(f"[INFO] Device: GPU ({gpu_name})")
     print(f"[INFO] GPU count: {gpu_count}")
+    print(f"[INFO] Model cache dir: {MODELS_DIR}")
     print(f"[INFO] Images to process: {len(IMAGES)}")
 
+    if len(IMAGES) == 0:
+        print("\n[WARN] No test images found.")
+        print(f"       Place images named 'page_*.jpg/png' in: {BASE_DIR}")
+        print("       Continuing to initialize pipeline (model download test)...")
+
     print(f"\n[LOAD] Initializing PaddleOCRVL pipeline (first run downloads models) ...")
+    print(f"       This may take several minutes on first run...")
     t0 = time.time()
-    pipeline = PaddleOCRVL(
-        pipeline_version=PIPELINE_VERSION,
-        device="gpu",
-    )
+    try:
+        pipeline = PaddleOCRVL(
+            pipeline_version=PIPELINE_VERSION,
+            device="gpu",
+        )
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize PaddleOCRVL: {e}")
+        print("        Try deleting corrupted model cache and rerun.")
+        print(f"        Cache location: {MODELS_DIR}")
+        raise
     t_load = time.time() - t0
     print(f"[OK] Pipeline initialized in {t_load:.1f}s")
+
+    if len(IMAGES) == 0:
+        print("\n[INFO] Pipeline initialized successfully. No images to process.")
+        print(f"       Put 'page_*.jpg/png' images in: {BASE_DIR}")
+        return []
 
     all_results = []
 
@@ -170,6 +194,10 @@ def process_images():
 
 
 def generate_report(results):
+    if not results:
+        print("\n[INFO] No results to generate report for (no images processed).")
+        return
+
     html_parts = ["""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <title>PaddleOCR-VL-1.6 Results (GPU)</title>

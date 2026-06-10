@@ -35,18 +35,11 @@ def _patch_update_model_kwargs_for_generation():
     _orig_update = PaddleOCRVLForConditionalGeneration.update_model_kwargs_for_generation
 
     def _patched_update(self, outputs, model_kwargs, is_encoder_decoder=False):
-        if (
-            isinstance(outputs, ModelOutput)
-            and "past_key_values" in outputs
-            and outputs.past_key_values is not None
-        ):
+        if isinstance(outputs, ModelOutput) and "past_key_values" in outputs and outputs.past_key_values is not None:
             model_kwargs["past_key_values"] = outputs.past_key_values
-        else:
-            model_kwargs = _orig_update(self, outputs, model_kwargs, is_encoder_decoder)
-        if (
-            not is_encoder_decoder
-            and model_kwargs.get("attention_mask", None) is not None
-        ):
+        elif isinstance(outputs, tuple) and len(outputs) > 1 and not isinstance(outputs[1], paddle.Tensor):
+            model_kwargs["past_key_values"] = outputs[1]
+        if not is_encoder_decoder and model_kwargs.get("attention_mask", None) is not None:
             attention_mask = model_kwargs["attention_mask"]
             model_kwargs["attention_mask"] = paddle.concat(
                 [

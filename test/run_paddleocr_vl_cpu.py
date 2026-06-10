@@ -7,6 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 MODELS_DIR = PROJECT_ROOT / "models" / "paddlex_models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 os.environ["PADDLE_PDX_CACHE_HOME"] = str(MODELS_DIR.parent)
 os.environ["HF_ENDPOINT"] = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
 
@@ -198,7 +199,7 @@ h2 { color: #555; margin-top: 30px; }
         if r.get("error"):
             html_parts.append(f'<div class="error">Error: {r["error"]}</div>')
         else:
-            orig_img = BASE_DIR / r["image"]
+            orig_img = Path(IMAGE_DIR) / r["image"]
             md_path = OUTPUT_DIR / Path(r["image"]).stem / f"{Path(r['image']).stem}.md"
 
             if orig_img.exists():

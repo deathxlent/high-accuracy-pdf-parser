@@ -29,7 +29,18 @@ def _get_cuda_info():
         if paddle.device.is_compiled_with_cuda():
             gpu_count = paddle.device.cuda.device_count()
             gpu_name = paddle.device.cuda.get_device_name(0) if gpu_count > 0 else "N/A"
-            return True, gpu_count, gpu_name
+            compute_capability = None
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader,nounits"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    compute_capability = result.stdout.strip().split("\n")[0].strip()
+            except Exception:
+                pass
+            return True, gpu_count, gpu_name, compute_capability
     except Exception:
         pass
     try:
@@ -37,16 +48,35 @@ def _get_cuda_info():
         if torch.cuda.is_available():
             gpu_count = torch.cuda.device_count()
             gpu_name = torch.cuda.get_device_name(0) if gpu_count > 0 else "N/A"
-            return True, gpu_count, gpu_name
+            compute_capability = None
+            try:
+                cap = torch.cuda.get_device_capability(0)
+                compute_capability = f"{cap[0]}.{cap[1]}"
+            except Exception:
+                pass
+            return True, gpu_count, gpu_name, compute_capability
     except Exception:
         pass
-    return False, 0, "N/A"
+    return False, 0, "N/A", None
+
+
+def _is_sm_compatible(compute_capability):
+    if not compute_capability:
+        return True, None
+    try:
+        major, minor = map(int, compute_capability.split("."))
+        sm_ver = major * 10 + minor
+        if sm_ver < 70:
+            return False, f"SM {compute_capability} (requires SM >= 7.0 with CUDA 12.x)"
+        return True, None
+    except Exception:
+        return True, None
 
 
 def check_environment():
     print("[CHECK] Verifying environment for PaddleOCR-VL-1.6 (GPU) ...")
 
-    has_cuda, gpu_count, gpu_name = _get_cuda_info()
+    has_cuda, gpu_count, gpu_name, compute_capability = _get_cuda_info()
     if not has_cuda:
         print("[ERROR] No CUDA GPU detected.")
         print("        Please ensure NVIDIA GPU + drivers are installed, then run:")
@@ -54,6 +84,12 @@ def check_environment():
         sys.exit(1)
 
     print(f"[OK] GPU detected: {gpu_name} (x{gpu_count})")
+    if compute_capability:
+        print(f"[OK] Compute Capability: SM {compute_capability}")
+        compatible, reason = _is_sm_compatible(compute_capability)
+        if not compatible:
+            print(f"[WARN] GPU may be incompatible: {reason}")
+            print(f"       Will attempt auto-fallback to CPU mode if GPU fails.")
 
     try:
         import paddle
@@ -87,7 +123,9 @@ def check_environment():
 def process_images():
     from paddleocr import PaddleOCRVL
 
-    has_cuda, gpu_count, gpu_name = _get_cuda_info()
+    has_cuda, gpu_count, gpu_name, compute_capability = _get_cuda_info()
+    device_to_use = "gpu"
+    fallback_to_cpu = False
 
     print("\n" + "=" * 60)
     print("  PaddleOCR-VL-1.6 - Document Parsing Pipeline (GPU)")
@@ -96,6 +134,12 @@ def process_images():
     print(f"[INFO] Pipeline version: {PIPELINE_VERSION}")
     print(f"[INFO] Device: GPU ({gpu_name})")
     print(f"[INFO] GPU count: {gpu_count}")
+    if compute_capability:
+        print(f"[INFO] Compute Capability: SM {compute_capability}")
+        compatible, reason = _is_sm_compatible(compute_capability)
+        if not compatible:
+            print(f"[WARN] GPU incompatibility detected: {reason}")
+            fallback_to_cpu = True
     print(f"[INFO] Model cache dir: {MODELS_DIR}")
     print(f"[INFO] Images to process: {len(IMAGES)}")
 
@@ -104,21 +148,42 @@ def process_images():
         print(f"       Place images named 'page_*.jpg/png' in: {BASE_DIR}")
         print("       Continuing to initialize pipeline (model download test)...")
 
-    print(f"\n[LOAD] Initializing PaddleOCRVL pipeline (first run downloads models) ...")
-    print(f"       This may take several minutes on first run...")
-    t0 = time.time()
-    try:
-        pipeline = PaddleOCRVL(
-            pipeline_version=PIPELINE_VERSION,
-            device="gpu",
-        )
-    except Exception as e:
-        print(f"[ERROR] Failed to initialize PaddleOCRVL: {e}")
-        print("        Try deleting corrupted model cache and rerun.")
-        print(f"        Cache location: {MODELS_DIR}")
-        raise
-    t_load = time.time() - t0
-    print(f"[OK] Pipeline initialized in {t_load:.1f}s")
+    pipeline = None
+    if not fallback_to_cpu:
+        print(f"\n[LOAD] Initializing PaddleOCRVL pipeline with GPU ...")
+        print(f"       This may take several minutes on first run...")
+        t0 = time.time()
+        try:
+            pipeline = PaddleOCRVL(
+                pipeline_version=PIPELINE_VERSION,
+                device="gpu",
+            )
+            t_load = time.time() - t0
+            print(f"[OK] Pipeline initialized (GPU) in {t_load:.1f}s")
+        except Exception as e:
+            err_msg = str(e)
+            print(f"[WARN] GPU initialization failed: {err_msg}")
+            if "SM" in err_msg or "not compiled" in err_msg or "compute" in err_msg.lower():
+                print("[WARN] This appears to be a GPU compute capability incompatibility.")
+            fallback_to_cpu = True
+
+    if fallback_to_cpu or pipeline is None:
+        print(f"\n[LOAD] Falling back to CPU mode...")
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        device_to_use = "cpu"
+        t0 = time.time()
+        try:
+            pipeline = PaddleOCRVL(
+                pipeline_version=PIPELINE_VERSION,
+                device="cpu",
+            )
+            t_load = time.time() - t0
+            print(f"[OK] Pipeline initialized (CPU fallback) in {t_load:.1f}s")
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize PaddleOCRVL even with CPU: {e}")
+            print("        Try deleting corrupted model cache and rerun.")
+            print(f"        Cache location: {MODELS_DIR}")
+            raise
 
     if len(IMAGES) == 0:
         print("\n[INFO] Pipeline initialized successfully. No images to process.")
@@ -141,7 +206,7 @@ def process_images():
             result = {
                 "image": img_name,
                 "pipeline_version": PIPELINE_VERSION,
-                "device": f"gpu:{gpu_name}",
+                "device": f"{device_to_use}:{gpu_name}" if device_to_use == "gpu" else "cpu (fallback)",
                 "elements": [],
                 "markdown": "",
                 "error": None,
@@ -183,7 +248,7 @@ def process_images():
             all_results.append({
                 "image": img_name,
                 "pipeline_version": PIPELINE_VERSION,
-                "device": f"gpu:{gpu_name}",
+                "device": f"{device_to_use}:{gpu_name}" if device_to_use == "gpu" else "cpu (fallback)",
                 "elements": [],
                 "markdown": "",
                 "error": str(e),
@@ -234,7 +299,7 @@ h2 { color: #555; margin-top: 30px; }
         if r.get("error"):
             html_parts.append(f'<div class="error">Error: {r["error"]}</div>')
         else:
-            orig_img = BASE_DIR / r["image"]
+            orig_img = Path(IMAGE_DIR) / r["image"]
             md_path = OUTPUT_DIR / Path(r["image"]).stem / f"{Path(r['image']).stem}.md"
 
             if orig_img.exists():

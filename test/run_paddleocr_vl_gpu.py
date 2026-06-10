@@ -17,8 +17,8 @@ except OSError:
 
 BASE_DIR = Path(__file__).parent.resolve()
 OUTPUT_DIR = BASE_DIR / "output_paddleocr_vl_gpu"
-
-IMAGES = sorted([f for f in os.listdir(BASE_DIR) if f.lower().endswith(('.jpg', '.jpeg', '.png')) and f.startswith('page_')])
+IMAGE_DIR = str(Path(__file__).parent.parent.resolve() / "tmp/42e59745cdb54b6fb2c635d7c11dbd43")
+IMAGES = sorted([f for f in os.listdir(IMAGE_DIR) if f.lower().endswith(('.jpg', '.jpeg', '.png')) and f.startswith('page_')])
 
 PIPELINE_VERSION = "v1.6"
 
@@ -128,7 +128,7 @@ def process_images():
     all_results = []
 
     for img_name in IMAGES:
-        img_path = str(BASE_DIR / img_name)
+        img_path = IMAGE_DIR +"/"+ img_name
         img_out_dir = OUTPUT_DIR / Path(img_name).stem
         img_out_dir.mkdir(parents=True, exist_ok=True)
 

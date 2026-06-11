@@ -184,12 +184,5 @@ def main():
 
     print_report()
 
-    # 保存结果
-    from datetime import datetime
-    from run_paddleocr_vl_gpu import save_single_result
-    output_dir = Path(__file__).parent / f"result_paddleocr_vl_gpu_perf_{datetime.now().strftime('%H%M%S')}"
-    save_single_result(output, IMAGE_DIR, str(output_dir))
-    print(f"[OK] Result saved to: {output_dir}")
-
 if __name__ == "__main__":
     main()

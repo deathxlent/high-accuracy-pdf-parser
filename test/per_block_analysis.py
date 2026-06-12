@@ -73,7 +73,7 @@ def main():
             result = _orig_generate(self, *args, **kwargs)
         finally:
             dt = time.perf_counter() - t0
-            n_out = len(result[0]) if isinstance(result, (list, tuple)) else "N/A"
+            n_out = result[0].shape[1] if isinstance(result, (list, tuple)) else "N/A"
             info = {
                 "time": dt,
                 "pixels": pixel_count,

@@ -1,0 +1,38 @@
+
+Loading model... 
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b9571-e3471b3e7
+model      : PaddleOCR-VL-1.6.Q4_K_M.gguf
+modalities : text, vision
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+  /image <file>       add an image file
+  /video <file>       add a video file
+
+Loaded media from 'tmp\42e59745cdb54b6fb2c635d7c11dbd43\page_1.jpg'
+
+> Table Recognition:
+
+<fcel>项 目<fcel>2017 年 3 月<fcel>2016 年<fcel>2015 年<fcel>2014 年<nl><fcel>公路运营毛利率<fcel>83.06<fcel>80.56<fcel>39.28<fcel>47.38<nl><fcel>销售商品毛利率<fcel>9.97<fcel>8.41<fcel>15.14<fcel>6.32<nl><fcel>其他毛利率<fcel>58.93<fcel>41.35<fcel>52.99<fcel>-128.36<nl><fcel>合计<fcel>61.44<fcel>61.53<fcel>36.52<fcel>33.36<nl><fcel>2014-2016年及2017年1-6月,发行人主营业务毛利率分别为33.36%、36.52%、61.53%和61.44%,同期发行人公路运营板块的毛利率分别为47.38%、39.28%、80.56%和83.06%,由于从2016年起,政府性高速公路不再计提折旧,故发行人高速公路运营成本大大降低,使得利润率大幅上升,销售商品板块的毛利率分别为6.32%、15.14%、8.41%和9.97%。<lcel><lcel><lcel><lcel><nl><fcel>（四）公路运营板块状况<lcel><lcel><lcel><lcel><nl><fcel>1、公路建设模式<lcel><lcel><lcel><lcel><nl><fcel>发行人以公路建设、运营、管理为主业。公司运营的公路、在建公路均通过社会公开招标方式选择施工单位建设,自己不负责项目施工建设。<lcel><lcel><lcel><lcel><nl><fcel>2、公路资产情况<lcel><lcel><lcel><lcel><nl><fcel>表 5-10: 发行人 2017 年 3 月末主要公路资产统计表（单位：公里）<lcel><lcel><lcel><lcel><nl><fcel>所属干线<fcel>公路名称<fcel>公路起止<fcel>路产属性<fcel>收费年限<nl><fcel>G75 兰海高速<fcel>崇遵公路<fcel>起自桐梓县松坎镇, 止于红花岗区中庄镇<fcel>收费还贷<fcel>2005-2035<nl><ucel><fcel>贵遵公路（不含北南）<fcel>起自贵阳市老客车站, 止于红花岗区中庄镇<fcel>收费还贷<fcel>2007-2035<nl><ucel><fcel>扎南公路<fcel>起自贵阳市扎佐, 止于遵义县南白镇<fcel>收费还贷<fcel>2007-2035<nl><ucel><fcel>贵阳东北绕城公路<fcel>起自罗子林, 止于尖坡<fcel>收费还贷<fcel>1998-2024<nl><ucel><fcel>贵新公路<fcel>起自小碧乡下坝, 止于独山县麻尾镇<fcel>收费还贷<fcel>2000-2021<nl>
+
+[ Prompt: 71.4 t/s | Generation: 67.0 t/s ]
+
+> 
+
+> 
+
+Exiting...

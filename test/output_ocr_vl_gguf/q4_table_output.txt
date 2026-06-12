@@ -1,0 +1,7 @@
+0.01.840.003 E llama_model_load: error loading model: tensor 'token_embd.weight' data is not within the file bounds, model is corrupted or incomplete
+0.01.840.011 E llama_model_load_from_file_impl: failed to load model
+0.01.841.029 E common_fit_params: encountered an error while trying to fit params to free device memory: failed to load model
+0.01.871.209 E llama_model_load: error loading model: tensor 'token_embd.weight' data is not within the file bounds, model is corrupted or incomplete
+
+Loading model... 
+Failed to load the model

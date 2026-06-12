@@ -1,0 +1,53 @@
+
+Loading model... 
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b9571-e3471b3e7
+model      : PaddleOCR-VL-1.6.Q8_0.gguf
+modalities : text, vision
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+  /image <file>       add an image file
+  /video <file>       add a video file
+
+Loaded media from 'tmp\42e59745cdb54b6fb2c635d7c11dbd43\page_1.jpg'
+
+> OCR:
+
+贵州高速公路集团有限公司2017年度第一期中期票据（专项扶贫）募集说明书
+
+营业务毛利润稳定增长，得益于公路运营板块所得毛利润的稳定增长。
+
+发行人2014-2016年及2017年1-6月主营业务毛利率结构如下表：
+
+表5-9：发行人2014-2016年及2017年1-6月主营业务毛利率结构
+
+（单位：%）
+项目 2017年3月 2016年 2015年 2014年
+公路运营毛利率 83.06 80.56 39.28 47.38
+销售商品毛利率 9.97 8.41 15.14 6.32
+其他毛利率 58.93 41.
+
+[ Prompt: 72.6 t/s | Generation: 65.2 t/s ]
+
+> 
+
+> 
+
+> 
+
+Exiting...
+[0m

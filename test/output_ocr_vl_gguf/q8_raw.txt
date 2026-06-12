@@ -1,0 +1,38 @@
+
+Loading model... 
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b9571-e3471b3e7
+model      : PaddleOCR-VL-1.6.Q8_0.gguf
+modalities : text, vision
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+  /image <file>       add an image file
+  /video <file>       add a video file
+
+Loaded media from 'tmp\42e59745cdb54b6fb2c635d7c11dbd43\page_1.jpg'
+
+> Table Recognition:
+
+<fcel>贵州高速公路集团有限公司2017年度第一期中期票据（专项扶贫）募集说明书<lcel><lcel><lcel><lcel><lcel><lcel><nl><fcel>营业业务毛利润稳定增长，得益于公路运营板块所得毛利润的稳定增长。\n发行人2014-2016年及2017年1-6月主营业务毛利率结构如下表：\n表5-9：发行人2014-2016年及2017年1-6月主营业务毛利率结构<lcel><lcel><lcel><lcel><lcel><lcel><nl><fcel>（单位：%）<lcel><lcel><lcel><lcel><lcel><lcel><nl><fcel>项目<fcel>2017年3月<fcel>2016年<fcel>2015年<fcel>2014年<ecel><ecel><nl><fcel>公路运营毛利率<fcel>83.06<fcel>80.56<fcel>39.28<fcel>47.38<ecel><ecel><nl><fcel>销售商品毛利率<fcel>9.97<fcel>8.41<fcel>15.14<fcel>6.32<ecel><ecel><nl><fcel>其他毛利率<fcel>58.93<fcel>41.35<fcel>52.99<fcel>-128.36<ecel><ecel><nl><fcel>合计<fcel>61.44<fcel>61.53<fcel>36.52<fcel>33.36<ecel><ecel><nl><fcel>2014-2016年及2017年1-6月，发行人主营业务毛利率分别为33.36%、36.52%、61.53%和61.44%，同期发行人公路运营板块的毛利率分别为47.38%、39.28%、80.56%和83.06%，由于从2016年起，政府性高速公路不再计提折旧，故发行人高速公路运营成本大大降低，使得利润率大幅上升，销售商品板块的毛利率分别为6.32%、15.14%、8.41%和9.97%。<lcel><lcel><lcel><lcel><lcel><lcel><nl><fcel>（四）公路运营板块状况<lcel><lcel><lcel><lcel><lcel><lcel><nl><fcel>1、公路建设模式<lcel><lcel><lcel><lcel><lcel><lcel><nl><fcel>发行人以公路建设、运营、管理为主业。公司运营的公路、在建公路均通过社会公开招标方式选择施工单位建设，自己不负责项目施工建设。<lcel><lcel><lcel><lcel><lcel><lcel><nl><fcel>2、公路资产情况<lcel><lcel><lcel><lcel><lcel><lcel><nl><fcel>表5-10：发行人2017年3月末主要公路资产统计表（单位：公里）<lcel><lcel><lcel><lcel><lcel><lcel><nl><fcel>所属干线<fcel>公路名称<fcel>公路起止<fcel>路产属性<fcel>收费年限<fcel>通车里程<fcel>收费里程<nl><fcel>G75兰海高速<fcel>崇遵公路<fcel>起自桐梓县松坎镇，止于红花岗区中庄镇<fcel>收费还贷<fcel>2005-2035<fcel>117.88<fcel>118.17<nl><ucel><fcel>贵遵公路（不含北南）<fcel>起自贵阳市老客车站，止于红花岗区中庄镇<fcel>收费还贷<fcel>2007-2035<fcel>51.59<fcel>44.96<nl><ucel><fcel>扎南公路<fcel>起自贵阳市扎佐，止于遵义县南白镇<fcel>收费还贷<fcel>2007-2035<fcel>84.50<fcel>84.37<nl><ucel><fcel>贵阳东北绕城公路<fcel>起自罗子林，止于尖坡<fcel>收费还贷<fcel>1998-2024<fcel>20.50<fcel>20.50<nl><ucel><fcel>贵新公路<fcel>起自小碧乡下坝，止于独山县麻尾镇<fcel>收费还贷<fcel>2000-2021<fcel>136.03<fcel>142.03<nl>
+
+[ Prompt: 69.7 t/s | Generation: 61.9 t/s ]
+
+> 
+
+> 
+
+Exiting...

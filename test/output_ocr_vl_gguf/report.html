@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PaddleOCR-VL-1.6 GGUF (Q4_K_M) 测试报告</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f0f2f5; color: #333; }
+.header { background: linear-gradient(135deg, #7c4dff, #4a148c); color: white; padding: 40px 0; text-align: center; }
+.header h1 { font-size: 28px; margin-bottom: 8px; }
+.header p { opacity: 0.85; font-size: 14px; }
+.container { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
+.card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; }
+.card .num { font-size: 32px; font-weight: 700; color: #7c4dff; }
+.card .label { font-size: 13px; color: #666; margin-top: 4px; }
+.section { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.section h2 { font-size: 18px; margin-bottom: 16px; color: #7c4dff; border-left: 4px solid #7c4dff; padding-left: 12px; }
+pre { background: #1e1e1e; color: #d4d4d4; padding: 20px; border-radius: 8px; font-size: 13px; line-height: 1.7; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; font-family: 'Cascadia Code', 'Fira Code', 'Source Han Mono', monospace; }
+.params-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+.params-table td { padding: 10px 12px; border: 1px solid #e8e8e8; }
+.params-table td:first-child { background: #fafafa; font-weight: 600; width: 140px; }
+.ocr-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+.ocr-table th { background: #7c4dff; color: white; padding: 8px 12px; text-align: left; font-weight: 600; white-space: nowrap; }
+.ocr-table td { padding: 6px 12px; border-bottom: 1px solid #e0e0e0; white-space: nowrap; }
+.ocr-table tr:hover td { background: #f5f0ff; }
+.ocr-table th:first-child, .ocr-table td:first-child { white-space: normal; min-width: 100px; }</style>
+</head>
+<body>
+<div class="header">
+    <h1>PaddleOCR-VL-1.6 GGUF (Q4_K_M) 测试报告</h1>
+    <p>llama.cpp · Q4_K_M 284 MB + mmproj 882MB · GPU offload · 提示词: "Table Recognition:"</p>
+</div>
+<div class="container">
+
+    <div class="cards">
+        <div class="card"><div class="num">71.4</div><div class="label">提示处理速度</div></div>
+        <div class="card"><div class="num">67.0</div><div class="label">生成速度</div></div>
+        <div class="card"><div class="num">0.5B</div><div class="label">模型参数量</div></div>
+        <div class="card"><div class="num">2</div><div class="label">检测到表格</div></div>
+    </div>
+
+    <div class="section">
+        <h2>模型配置</h2>
+        <table class="params-table">
+            <tr><td>LLM 主干</td><td>PaddleOCR-VL-1.6.Q4_K_M (284 MB, 由本地 F16 重新量化)</td></tr>
+            <tr><td>视觉编码器</td><td>PaddleOCR-VL-1.6-GGUF-mmproj.gguf (841 MB)</td></tr>
+            <tr><td>运行工具</td><td>llama-cli (b9571)</td></tr>
+            <tr><td>提示词</td><td><code>Table Recognition:</code></td></tr>
+            <tr><td>温度</td><td>0 (确定性输出)</td></tr>
+            <tr><td>GPU</td><td>NVIDIA Quadro P1000 (4GB VRAM)</td></tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>解析输出（表格已渲染为 HTML）</h2>
+        <table class="ocr-table">
+<tr><th>项 目</th><th>2017 年 3 月</th><th>2016 年</th><th>2015 年</th><th>2014 年</th></tr>
+<tr><td>公路运营毛利率</td><td>83.06</td><td>80.56</td><td>39.28</td><td>47.38</td></tr>
+<tr><td>销售商品毛利率</td><td>9.97</td><td>8.41</td><td>15.14</td><td>6.32</td></tr>
+<tr><td>其他毛利率</td><td>58.93</td><td>41.35</td><td>52.99</td><td>-128.36</td></tr>
+<tr><td>合计</td><td>61.44</td><td>61.53</td><td>36.52</td><td>33.36</td></tr>
+</table>
+2014-2016年及2017年1-6月,发行人主营业务毛利率分别为33.36%、36.52%、61.53%和61.44%,同期发行人公路运营板块的毛利率分别为47.38%、39.28%、80.56%和83.06%,由于从2016年起,政府性高速公路不再计提折旧,故发行人高速公路运营成本大大降低,使得利润率大幅上升,销售商品板块的毛利率分别为6.32%、15.14%、8.41%和9.97%。
+（四）公路运营板块状况
+1、公路建设模式
+发行人以公路建设、运营、管理为主业。公司运营的公路、在建公路均通过社会公开招标方式选择施工单位建设,自己不负责项目施工建设。
+2、公路资产情况
+表 5-10: 发行人 2017 年 3 月末主要公路资产统计表（单位：公里）
+<table class="ocr-table">
+<tr><th>所属干线</th><th>公路名称</th><th>公路起止</th><th>路产属性</th><th>收费年限</th></tr>
+<tr><td rowspan="5">G75 兰海高速</td><td>崇遵公路</td><td>起自桐梓县松坎镇, 止于红花岗区中庄镇</td><td>收费还贷</td><td>2005-2035</td></tr>
+<tr><td></td><td>贵遵公路（不含北南）</td><td>起自贵阳市老客车站, 止于红花岗区中庄镇</td><td>收费还贷</td><td>2007-2035</td></tr>
+<tr><td></td><td>扎南公路</td><td>起自贵阳市扎佐, 止于遵义县南白镇</td><td>收费还贷</td><td>2007-2035</td></tr>
+<tr><td></td><td>贵阳东北绕城公路</td><td>起自罗子林, 止于尖坡</td><td>收费还贷</td><td>1998-2024</td></tr>
+<tr><td></td><td>贵新公路</td><td>起自小碧乡下坝, 止于独山县麻尾镇</td><td>收费还贷</td><td>2000-2021</td></tr>
+</table>
+    </div>
+
+    <div class="section">
+        <h2>解析输出（纯文本原文）</h2>
+        <pre>项 目 2017 年 3 月 2016 年 2015 年 2014 年 公路运营毛利率 83.06 80.56 39.28 47.38 销售商品毛利率 9.97 8.41 15.14 6.32 其他毛利率 58.93 41.35 52.99 -128.36 合计 61.44 61.53 36.52 33.36 2014-2016年及2017年1-6月,发行人主营业务毛利率分别为33.36%、36.52%、61.53%和61.44%,同期发行人公路运营板块的毛利率分别为47.38%、39.28%、80.56%和83.06%,由于从2016年起,政府性高速公路不再计提折旧,故发行人高速公路运营成本大大降低,使得利润率大幅上升,销售商品板块的毛利率分别为6.32%、15.14%、8.41%和9.97%。 （四）公路运营板块状况 1、公路建设模式 发行人以公路建设、运营、管理为主业。公司运营的公路、在建公路均通过社会公开招标方式选择施工单位建设,自己不负责项目施工建设。 2、公路资产情况 表 5-10: 发行人 2017 年 3 月末主要公路资产统计表（单位：公里） 所属干线 公路名称 公路起止 路产属性 收费年限 G75 兰海高速 崇遵公路 起自桐梓县松坎镇, 止于红花岗区中庄镇 收费还贷 2005-2035 贵遵公路（不含北南） 起自贵阳市老客车站, 止于红花岗区中庄镇 收费还贷 2007-2035 扎南公路 起自贵阳市扎佐, 止于遵义县南白镇 收费还贷 2007-2035 贵阳东北绕城公路 起自罗子林, 止于尖坡 收费还贷 1998-2024 贵新公路 起自小碧乡下坝, 止于独山县麻尾镇 收费还贷 2000-2021</pre>
+    </div>
+
+</div>
+</body>
+</html>

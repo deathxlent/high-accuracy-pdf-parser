@@ -17,8 +17,11 @@
 
 import logging
 import fitz
-from backend.services.ocr_service import ocr_region
+from backend.services import ocr_service_vl as ocr_service
 from backend.services.pdf_service import jpg_bbox_to_pdf_bbox, DEFAULT_DPI
+
+ocr_region = ocr_service.ocr_region
+extract_table_with_vl = ocr_service.extract_table_with_vl
 
 logger = logging.getLogger(__name__)
 
@@ -499,18 +502,12 @@ def extract_table_from_native(pdf_page: fitz.Page,
 
 def extract_table_from_scanned(image_path: str, bbox: tuple) -> dict:
     """
-    从扫描件 PDF 提取表格（使用 OCR 方案）。
+    从扫描件 PDF 提取表格（使用 PaddleOCR-VL GGUF 方案）。
 
     流程:
-        1. OCR 识别: 对表格区域进行 OCR，获取纯文本
-        2. 文本解析: 尝试按行和分隔符解析为表格结构
-        3. HTML 生成: 转换为简单 HTML 表格（扫描件无法准确识别 span）
-
-    注意:
-        扫描件的跨行跨列识别非常困难，此函数生成的 HTML
-        不包含 rowspan/colspan，仅为简单的网格结构。
-        如果需要精确的跨行跨列，需要使用 TableTransformer 等
-        更复杂的模型（参考 old-code 的 extract_table_html.py）。
+        1. 调用 llama-server API，使用 "Table Recognition:" 提示词
+        2. 解析 PaddleOCR-VL 的 <fcel>/<nl>/<ucel> 结构化输出
+        3. 生成支持 rowspan/colspan 的 HTML 表格
 
     Args:
         image_path: 页面 JPG 图片路径
@@ -523,14 +520,18 @@ def extract_table_from_scanned(image_path: str, bbox: tuple) -> dict:
             - rows: 行数
             - cols: 列数
     """
+    try:
+        result = extract_table_with_vl(image_path, bbox)
+        if result.get("html") or result.get("rows", 0) > 0:
+            return result
+    except Exception as e:
+        logger.warning(f"VL table extraction failed, falling back: {e}")
+
     text = ocr_region(image_path, bbox)
     if not text.strip():
         return {"html": "", "markdown": "", "rows": 0, "cols": 0}
 
-    # 将 OCR 文本解析为表格
     lines = [line.strip() for line in text.split("\n") if line.strip()]
-
-    # 构建 Markdown（简化版，无 span）
     md_lines = []
     for i, line in enumerate(lines):
         cells = [c.strip() for c in line.split() if c.strip()]
@@ -541,11 +542,7 @@ def extract_table_from_scanned(image_path: str, bbox: tuple) -> dict:
             md_lines.append("| " + " | ".join(["---"] * len(cells)) + " |")
 
     markdown = "\n".join(md_lines)
-
-    # 构建 HTML（扫描件无法准确识别跨行跨列，生成简单表格）
     html = _text_to_html_table(text)
-
-    # 粗略估算行列数
     rows = len(lines)
     cols = 0
     if md_lines:

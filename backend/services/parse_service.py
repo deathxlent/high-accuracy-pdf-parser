@@ -9,7 +9,7 @@ from backend.services.pdf_service import (
 )
 from backend.services.layout_service import detect_layout_batch, deduplicate_header_footer
 from backend.services.order_service import assign_reading_order, assign_reading_order_batch
-from backend.services.ocr_service import ocr_region, ocr_formula, ocr_batch, ocr_batch_multi_image
+from backend.services.ocr_service_vl import ocr_region, ocr_formula, ocr_batch, ocr_batch_multi_image
 from backend.services.table_service import extract_table_from_native, extract_table_from_scanned
 from backend.services.picture_service import extract_picture
 

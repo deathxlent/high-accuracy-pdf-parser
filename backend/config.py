@@ -14,7 +14,7 @@ HF_MIRROR_URL = "https://hf-mirror.com"
 YOLO_MODEL_REPO = "Armaggheddon/yolo26-document-layout"
 YOLO_MODEL_FILE = "yolo26m_doc_layout.pt"
 YOLO_IMG_SIZE = 1280
-YOLO_DEVICE = "cuda"
+YOLO_DEVICE = "cpu"
 
 SURYA_ORDER_MODEL_REPO = "vikp/surya_order"
 

@@ -2,11 +2,54 @@ import logging
 import os
 from PIL import Image
 from backend.services.layout_service import detect_layout
+from backend.config import MODELS_DIR, HF_MIRROR_URL, SURYA_ORDER_MODEL_REPO
 
 logger = logging.getLogger(__name__)
 
 _order_model = None
 _order_processor = None
+
+
+def _download_surya_order_model() -> str:
+    local_dir = MODELS_DIR / "surya_order"
+    local_dir.mkdir(parents=True, exist_ok=True)
+
+    marker_file = local_dir / "config.json"
+    if marker_file.exists():
+        logger.info(f"Surya order model already downloaded at {local_dir}")
+        return str(local_dir)
+
+    logger.info(f"Downloading {SURYA_ORDER_MODEL_REPO} from {HF_MIRROR_URL} to {local_dir}...")
+
+    os.environ["HF_ENDPOINT"] = HF_MIRROR_URL
+
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except:
+        pass
+
+    try:
+        from huggingface_hub import snapshot_download
+        import ssl
+        try:
+            _create_unverified_https_context = ssl._create_unverified_context
+        except AttributeError:
+            pass
+        else:
+            ssl._create_default_https_context = _create_unverified_https_context
+
+        snapshot_download(
+            repo_id=SURYA_ORDER_MODEL_REPO,
+            local_dir=str(local_dir),
+        )
+        logger.info(f"Surya order model downloaded successfully to {local_dir}")
+    except Exception as e:
+        logger.warning(f"Failed to download Surya order model: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
+
+    return str(local_dir)
 
 
 def _get_ordering_model_and_processor():
@@ -15,17 +58,35 @@ def _get_ordering_model_and_processor():
         return _order_model, _order_processor
 
     try:
-        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-        
+        import os
+        os.environ["HF_ENDPOINT"] = HF_MIRROR_URL
+
+        try:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        except:
+            pass
+        import ssl
+        try:
+            _create_unverified_https_context = ssl._create_unverified_context
+        except AttributeError:
+            pass
+        else:
+            ssl._create_default_https_context = _create_unverified_https_context
+
+        local_model_path = _download_surya_order_model()
+
         from surya.model.ordering.model import load_model as order_load_model
         from surya.model.ordering.processor import load_processor as order_load_processor
 
-        logger.info("Loading Surya ordering model...")
-        _order_model = order_load_model()
-        _order_processor = order_load_processor()
-        logger.info("Surya ordering model loaded successfully")
+        logger.info(f"Loading Surya ordering model from {local_model_path} on CPU...")
+        _order_model = order_load_model(checkpoint=local_model_path, device="cpu")
+        _order_processor = order_load_processor(checkpoint=local_model_path)
+        logger.info("Surya ordering model loaded successfully on CPU")
     except Exception as e:
         logger.warning(f"Failed to load Surya ordering model: {e}. Will use fallback reading order.")
+        import traceback
+        logger.warning(traceback.format_exc())
         _order_model = None
         _order_processor = None
 
@@ -68,6 +129,7 @@ def assign_reading_order(elements: list[dict], image_path: str) -> list[dict]:
 
     try:
         from surya.ordering import batch_ordering
+        import math
 
         image = Image.open(image_path)
         image_size = image.size
@@ -76,10 +138,10 @@ def assign_reading_order(elements: list[dict], image_path: str) -> list[dict]:
         for elem in elements:
             bbox = elem["bbox"]
             x0, y0, x1, y1 = bbox
-            x0 = max(0, min(1, x0 / image_size[0]))
-            y0 = max(0, min(1, y0 / image_size[1]))
-            x1 = max(0, min(1, x1 / image_size[0]))
-            y1 = max(0, min(1, y1 / image_size[1]))
+            x0 = max(0, math.floor(x0))
+            y0 = max(0, math.floor(y0))
+            x1 = min(image_size[0], math.ceil(x1))
+            y1 = min(image_size[1], math.ceil(y1))
             bboxes.append([x0, y0, x1, y1])
 
         ordering_results = batch_ordering([image], [bboxes], model, processor)
@@ -108,15 +170,9 @@ def assign_reading_order(elements: list[dict], image_path: str) -> list[dict]:
             best_position = len(elements)
 
             elem_bbox = elem["bbox"]
-            elem_norm = (
-                elem_bbox[0] / image_size[0],
-                elem_bbox[1] / image_size[1],
-                elem_bbox[2] / image_size[0],
-                elem_bbox[3] / image_size[1],
-            )
 
             for sbox in surya_boxes:
-                iou = _compute_iou(elem_norm, sbox["bbox"])
+                iou = _compute_iou(elem_bbox, sbox["bbox"])
                 if iou > best_iou:
                     best_iou = iou
                     best_position = sbox["position"]
@@ -145,10 +201,12 @@ def assign_reading_order_batch(pages_elements: list[list[dict]], image_paths: li
 
     try:
         from surya.ordering import batch_ordering
+        import math
 
         all_images = []
         all_bboxes = []
         valid_indices = []
+        image_sizes = []
 
         for idx, (elements, image_path) in enumerate(zip(pages_elements, image_paths)):
             if not elements:
@@ -157,15 +215,16 @@ def assign_reading_order_batch(pages_elements: list[list[dict]], image_paths: li
             image = Image.open(image_path)
             image_size = image.size
             all_images.append(image)
+            image_sizes.append(image_size)
 
             page_bboxes = []
             for elem in elements:
                 bbox = elem["bbox"]
                 x0, y0, x1, y1 = bbox
-                x0 = max(0, min(1, x0 / image_size[0]))
-                y0 = max(0, min(1, y0 / image_size[1]))
-                x1 = max(0, min(1, x1 / image_size[0]))
-                y1 = max(0, min(1, y1 / image_size[1]))
+                x0 = max(0, math.floor(x0))
+                y0 = max(0, math.floor(y0))
+                x1 = min(image_size[0], math.ceil(x1))
+                y1 = min(image_size[1], math.ceil(y1))
                 page_bboxes.append([x0, y0, x1, y1])
             all_bboxes.append(page_bboxes)
             valid_indices.append(idx)
@@ -182,9 +241,6 @@ def assign_reading_order_batch(pages_elements: list[list[dict]], image_paths: li
                 continue
 
             elements = pages_elements[page_idx]
-            image_path = image_paths[page_idx]
-            image = Image.open(image_path)
-            image_size = image.size
 
             surya_boxes = []
             for bbox_info in ordering_results[res_idx].bboxes:
@@ -204,15 +260,9 @@ def assign_reading_order_batch(pages_elements: list[list[dict]], image_paths: li
                 best_iou = 0.0
                 best_position = len(elements)
                 elem_bbox = elem["bbox"]
-                elem_norm = (
-                    elem_bbox[0] / image_size[0],
-                    elem_bbox[1] / image_size[1],
-                    elem_bbox[2] / image_size[0],
-                    elem_bbox[3] / image_size[1],
-                )
 
                 for sbox in surya_boxes:
-                    iou = _compute_iou(elem_norm, sbox["bbox"])
+                    iou = _compute_iou(elem_bbox, sbox["bbox"])
                     if iou > best_iou:
                         best_iou = iou
                         best_position = sbox["position"]

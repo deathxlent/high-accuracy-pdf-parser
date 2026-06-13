@@ -1,28 +1,35 @@
 import logging
+import os
 from PIL import Image
 from backend.services.layout_service import detect_layout
 
 logger = logging.getLogger(__name__)
 
-_manager = None
+_order_model = None
+_order_processor = None
 
 
-def _get_ordering_manager():
-    global _manager
-    if _manager is not None:
-        return _manager
+def _get_ordering_model_and_processor():
+    global _order_model, _order_processor
+    if _order_model is not None and _order_processor is not None:
+        return _order_model, _order_processor
 
     try:
-        from surya.inference import SuryaInferenceManager
+        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+        
+        from surya.model.ordering.model import load_model as order_load_model
+        from surya.model.ordering.processor import load_processor as order_load_processor
 
-        logger.info("Initializing Surya inference manager for ordering...")
-        _manager = SuryaInferenceManager()
-        logger.info("Surya inference manager loaded successfully")
+        logger.info("Loading Surya ordering model...")
+        _order_model = order_load_model()
+        _order_processor = order_load_processor()
+        logger.info("Surya ordering model loaded successfully")
     except Exception as e:
-        logger.warning(f"Failed to load Surya manager: {e}. Will use fallback reading order.")
-        _manager = None
+        logger.warning(f"Failed to load Surya ordering model: {e}. Will use fallback reading order.")
+        _order_model = None
+        _order_processor = None
 
-    return _manager
+    return _order_model, _order_processor
 
 
 def _compute_iou(box_a: tuple, box_b: tuple) -> float:
@@ -53,9 +60,9 @@ def assign_reading_order(elements: list[dict], image_path: str) -> list[dict]:
     if not elements:
         return elements
 
-    manager = _get_ordering_manager()
+    model, processor = _get_ordering_model_and_processor()
 
-    if manager is None:
+    if model is None or processor is None:
         logger.info("Using fallback reading order (top-to-bottom, left-to-right)")
         return _fallback_reading_order(elements)
 
@@ -75,7 +82,7 @@ def assign_reading_order(elements: list[dict], image_path: str) -> list[dict]:
             y1 = max(0, min(1, y1 / image_size[1]))
             bboxes.append([x0, y0, x1, y1])
 
-        ordering_results = batch_ordering([image], [bboxes], manager)
+        ordering_results = batch_ordering([image], [bboxes], model, processor)
 
         if not ordering_results or not ordering_results[0].bboxes:
             logger.warning("Surya batch_ordering returned no results, using fallback")
@@ -124,13 +131,15 @@ def assign_reading_order(elements: list[dict], image_path: str) -> list[dict]:
 
     except Exception as e:
         logger.error(f"Surya batch_ordering failed: {e}, using fallback")
+        import traceback
+        logger.error(traceback.format_exc())
         return _fallback_reading_order(elements)
 
 
 def assign_reading_order_batch(pages_elements: list[list[dict]], image_paths: list[str]) -> list[list[dict]]:
-    manager = _get_ordering_manager()
+    model, processor = _get_ordering_model_and_processor()
 
-    if manager is None:
+    if model is None or processor is None:
         logger.info("Using fallback reading order for all pages")
         return [_fallback_reading_order(elems) for elems in pages_elements]
 
@@ -164,7 +173,7 @@ def assign_reading_order_batch(pages_elements: list[list[dict]], image_paths: li
         if not all_images:
             return [_fallback_reading_order(elems) for elems in pages_elements]
 
-        ordering_results = batch_ordering(all_images, all_bboxes, manager)
+        ordering_results = batch_ordering(all_images, all_bboxes, model, processor)
 
         result = [_fallback_reading_order(elems) for elems in pages_elements]
 
@@ -220,4 +229,6 @@ def assign_reading_order_batch(pages_elements: list[list[dict]], image_paths: li
 
     except Exception as e:
         logger.error(f"Surya batch_ordering failed: {e}, using fallback")
+        import traceback
+        logger.error(traceback.format_exc())
         return [_fallback_reading_order(elems) for elems in pages_elements]

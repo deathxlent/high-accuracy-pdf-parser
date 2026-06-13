@@ -5,7 +5,7 @@ from pathlib import Path
 from huggingface_hub import hf_hub_download
 from ultralytics import YOLO
 from PIL import Image, ImageDraw, ImageFont
-from backend.config import MODELS_DIR, YOLO_MODEL_REPO, YOLO_MODEL_FILE, YOLO_IMG_SIZE
+from backend.config import MODELS_DIR, YOLO_MODEL_REPO, YOLO_MODEL_FILE, YOLO_IMG_SIZE, YOLO_DEVICE
 
 logger = logging.getLogger(__name__)
 
@@ -212,13 +212,36 @@ def _get_model() -> YOLO:
         model_path = Path(downloaded)
 
     logger.info(f"Loading YOLO26m model from {model_path}")
-    _model = YOLO(str(model_path))
+    
+    import torch
+    if YOLO_DEVICE == "cuda" and torch.cuda.is_available():
+        try:
+            _model = YOLO(str(model_path))
+            _model.to("cuda")
+            logger.info(f"YOLO model loaded on CUDA device: {torch.cuda.get_device_name(0)}")
+        except Exception as e:
+            logger.warning(f"Failed to load YOLO on CUDA: {e}, will use CPU")
+            _model = YOLO(str(model_path))
+    else:
+        logger.info(f"YOLO model running on CPU")
+        _model = YOLO(str(model_path))
+    
     return _model
+
+
+def _get_inference_kwargs() -> dict:
+    import torch
+    kwargs = {"imgsz": YOLO_IMG_SIZE, "verbose": False}
+    if YOLO_DEVICE == "cuda" and torch.cuda.is_available():
+        kwargs["device"] = "cuda"
+        kwargs["half"] = True
+    return kwargs
 
 
 def detect_layout(image_path: str) -> list[dict]:
     model = _get_model()
-    results = model(image_path, imgsz=YOLO_IMG_SIZE, verbose=False)
+    kwargs = _get_inference_kwargs()
+    results = model(image_path, **kwargs)
 
     elements = []
     raw_elements = []
@@ -268,7 +291,8 @@ def detect_layout_batch(image_paths: list[str]) -> list[list[dict]]:
         return []
 
     model = _get_model()
-    results = model(image_paths, imgsz=YOLO_IMG_SIZE, verbose=False)
+    kwargs = _get_inference_kwargs()
+    results = model(image_paths, **kwargs)
 
     all_elements = []
     for result_idx, result in enumerate(results):
